@@ -1,0 +1,14 @@
+This document outlines the complete roadmap for "Jarvis AGI," an Autonomous General Intelligence implemented in Python. Its fundamental operational loop involves **Perception, Cognition, and Action**, guided by the principle "Observe. Think. Decide. Act. Learn."
+
+Key components include:
+
+1.  **Perception Layer:** Allows Jarvis to understand its environment through voice input (STT), screen awareness (vision LLMs, OCR), system awareness (CPU, RAM, battery), and file/clipboard monitoring.
+2.  **Memory System:** Employs short-term (session-based), long-term (Markdown files), episodic (vector database for past sessions), and semantic (knowledge graph) storage to retain and retrieve information.
+3.  **Cognition Engine:** Handles intent routing, complex task planning (using a ReAct loop), goal management (tracking and prioritizing objectives), and dynamic context building for LLM interactions.
+4.  **Action Layer:** Provides concrete capabilities for OS control, web browsing/search, file operations, sandboxed Python code execution, and comprehensive communication (WhatsApp, Email, system notifications, TTS output).
+5.  **Autonomy Engine:** Enables Jarvis to act without explicit commands via a proactive scheduler (based on routines/triggers), background task execution, opportunity detection, and self-initiated learning on user interests.
+6.  **Learning Loop:** Facilitates improvement through explicit user feedback, implicit behavioral observation (e.g., repeated queries), a behavior tuner to adjust its persona, and daily self-reviews of its performance.
+7.  **Self-Monitoring:** Ensures system health checks, robust error recovery mechanisms, and detection of "context drift" to maintain consistent behavior and personality.
+8.  **Security & Privacy:** Addressed with a granular permission system for actions and data guards to prevent storage or external transmission of sensitive information, with an option for local-only models.
+
+The project features a modular Python architecture, lists core dependencies, and suggests a phased implementation plan, starting with the core "brain" components before adding voice, action, memory, and autonomy features.

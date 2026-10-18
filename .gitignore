@@ -1,0 +1,43 @@
+# ── Audit reports (generated, not source) ──────────────────────────────────
+audit/
+
+# ── Secrets & credentials — NEVER commit these ─────────────────────────────
+config/api_keys.json
+.env
+.env.*
+*.pem
+*.key
+
+# ── User personal data ──────────────────────────────────────────────────────
+memory/long_term.json
+memory/long_term.json.bak
+memory/long_term.json.tmp
+memory/USER_IDENTITY.md
+memory/USER_PREFERENCES.md
+memory/USER_PROJECTS.md
+memory/USER_ROUTINES.md
+memory/USER_CONTEXT.md
+memory/USER_SKILLS.md
+memory/USER_RELATIONS.md
+
+# ── Runtime / generated artefacts ──────────────────────────────────────────
+logs/*.log
+temp/
+*.pyc
+__pycache__/
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Build / distribution ────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── IDE / OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

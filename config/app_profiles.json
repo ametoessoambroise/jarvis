@@ -1,0 +1,43 @@
+{
+    "blocked": {
+        "processes": [
+            "keepass.exe",
+            "1password.exe",
+            "bitwarden.exe",
+            "lastpass.exe",
+            "signal.exe"
+        ],
+        "title_patterns": [
+            "mot de passe",
+            "password",
+            "connexion sécurisée",
+            "authentification",
+            "code pin",
+            "two.factor",
+            "2fa"
+        ]
+    },
+    "browser": {
+        "processes": ["chrome.exe", "msedge.exe", "brave.exe"],
+        "cdp_port": 9222
+    },
+    "vision_only": {
+        "processes": [
+            "photoshop.exe",
+            "premiere.exe",
+            "blender.exe"
+        ],
+        "title_patterns": ["DirectX"]
+    },
+    "capture": {
+        "interval_seconds": 1.5,
+        "width": 640,
+        "height": 360,
+        "jpeg_quality": 50,
+        "diff_enabled": true
+    },
+    "privacy": {
+        "blur_password_fields": true,
+        "confirm_critical_actions": true
+    }
+}

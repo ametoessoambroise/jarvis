@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "allowed_apps": [
+    "WhatsApp",
+    "WhatsApp Web",
+    "Telegram",
+    "Discord",
+    "Messenger"
+  ],
+  "auto_reply_enabled": true,
+  "rules": [
+    {
+      "app": "WhatsApp",
+      "sender": "Spam",
+      "action": "ignore"
+    }
+  ]
+}
