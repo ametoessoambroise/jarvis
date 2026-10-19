@@ -1030,8 +1030,10 @@ class MainWindow(QMainWindow):
     def _on_setup_done(self, key: str, os_name: str):
         # Save secret to .env
         settings.save_secret("GEMINI_API_KEY", key)
-        # Save settings to settings.json
-        settings.save_settings({"os_system": os_name})
+        # Save settings to settings.json (merge with existing settings)
+        cfg = settings.get_settings()
+        cfg["os_system"] = os_name
+        settings.save_settings(cfg)
         self._ready = True
         if self._overlay:
             self._overlay.hide()
