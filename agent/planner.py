@@ -10,7 +10,9 @@ from core.utils import _get_api_key  # noqa: E402
 
 BASE_DIR = settings.paths.root
 
-PLANNER_PROMPT = """You are the planning module of MARK XXXIX, a personal AI assistant.
+from core.tool_registry import _REGISTRY
+
+_PROMPT_HEADER = """You are the planning module of MARK XXXIX, a personal AI assistant.
 Your job: break any user goal into a sequence of steps using ONLY the tools listed below.
 
 ABSOLUTE RULES:
@@ -21,99 +23,120 @@ ABSOLUTE RULES:
 - Max 5 steps. Use the minimum steps needed.
 
 AVAILABLE TOOLS AND THEIR PARAMETERS:
+"""
 
-open_app
-  app_name: string (required)
+_TOOL_DESCRIPTIONS = {
+    "open_app": (
+        "open_app\n"
+        "  app_name: string (required)"
+    ),
+    "web_search": (
+        "web_search\n"
+        "  query: string (required) — write a clear, focused search query\n"
+        '  mode: "search" or "compare" (optional, default: search)\n'
+        "  items: list of strings (optional, for compare mode)\n"
+        "  aspect: string (optional, for compare mode)"
+    ),
+    "game_updater": (
+        "game_updater\n"
+        '  action: "update" | "install" | "list" | "download_status" | "schedule" (required)\n'
+        '  platform: "steam" | "epic" | "both" (optional, default: both)\n'
+        "  game_name: string (optional)\n"
+        "  app_id: string (optional)\n"
+        "  shutdown_when_done: boolean (optional)"
+    ),
+    "browser_control": (
+        "browser_control\n"
+        '  action: "go_to" | "search" | "click" | "type" | "scroll" | "get_text" | "press" | "close" (required)\n'
+        "  url: string (for go_to)\n"
+        "  query: string (for search)\n"
+        "  text: string (for click/type)\n"
+        '  direction: "up" | "down" (for scroll)'
+    ),
+    "file_controller": (
+        "file_controller\n"
+        '  action: "write" | "create_file" | "read" | "list" | "delete" | "move" | "copy" | "find" | "disk_usage" (required)\n'
+        '  path: string — use "desktop" for Desktop folder\n'
+        "  name: string — filename\n"
+        "  content: string — file content (for write/create_file)"
+    ),
+    "computer_settings": (
+        "computer_settings\n"
+        "  action: string (required)\n"
+        "  description: string — natural language description\n"
+        "  value: string (optional)"
+    ),
+    "computer_control": (
+        "computer_control\n"
+        '  action: "type" | "click" | "hotkey" | "press" | "scroll" | "screenshot" | "screen_find" | "screen_click" (required)\n'
+        "  text: string (for type)\n"
+        "  x, y: int (for click)\n"
+        '  keys: string (for hotkey, e.g. "ctrl+c")\n'
+        "  key: string (for press)\n"
+        '  direction: "up" | "down" (for scroll)\n'
+        "  description: string (for screen_find/screen_click)"
+    ),
+    "screen_process": (
+        "screen_process\n"
+        "  text: string (required) — what to analyze or ask about the screen\n"
+        '  angle: "screen" | "camera" (optional)'
+    ),
+    "send_message": (
+        "send_message\n"
+        "  receiver: string (required)\n"
+        "  message_text: string (required)\n"
+        "  platform: string (required)"
+    ),
+    "reminder": (
+        "reminder\n"
+        "  date: string YYYY-MM-DD (required)\n"
+        "  time: string HH:MM (required)\n"
+        "  message: string (required)"
+    ),
+    "desktop_control": (
+        "desktop_control\n"
+        '  action: "wallpaper" | "organize" | "clean" | "list" | "task" (required)\n'
+        "  path: string (optional)\n"
+        "  task: string (optional)"
+    ),
+    "youtube_video": (
+        "youtube_video\n"
+        '  action: "play" | "summarize" | "trending" (required)\n'
+        "  query: string (for play)"
+    ),
+    "weather_report": (
+        "weather_report\n"
+        "  city: string (required)"
+    ),
+    "flight_finder": (
+        "flight_finder\n"
+        "  origin: string (required)\n"
+        "  destination: string (required)\n"
+        "  date: string (required)"
+    ),
+    "code_helper": (
+        "code_helper\n"
+        '  action: "write" | "edit" | "run" | "explain" (required)\n'
+        "  description: string (required)\n"
+        "  language: string (optional)\n"
+        "  output_path: string (optional)\n"
+        "  file_path: string (optional)"
+    ),
+    "dev_agent": (
+        "dev_agent\n"
+        "  description: string (required)\n"
+        "  language: string (optional)"
+    ),
+}
 
-web_search
-  query: string (required) — write a clear, focused search query
-  mode: "search" or "compare" (optional, default: search)
-  items: list of strings (optional, for compare mode)
-  aspect: string (optional, for compare mode)
-
-game_updater
-  action: "update" | "install" | "list" | "download_status" | "schedule" (required)
-  platform: "steam" | "epic" | "both" (optional, default: both)
-  game_name: string (optional)
-  app_id: string (optional)
-  shutdown_when_done: boolean (optional)
-
-browser_control
-  action: "go_to" | "search" | "click" | "type" | "scroll" | "get_text" | "press" | "close" (required)
-  url: string (for go_to)
-  query: string (for search)
-  text: string (for click/type)
-  direction: "up" | "down" (for scroll)
-
-file_controller
-  action: "write" | "create_file" | "read" | "list" | "delete" | "move" | "copy" | "find" | "disk_usage" (required)
-  path: string — use "desktop" for Desktop folder
-  name: string — filename
-  content: string — file content (for write/create_file)
-
-computer_settings
-  action: string (required)
-  description: string — natural language description
-  value: string (optional)
-
-computer_control
-  action: "type" | "click" | "hotkey" | "press" | "scroll" | "screenshot" | "screen_find" | "screen_click" (required)
-  text: string (for type)
-  x, y: int (for click)
-  keys: string (for hotkey, e.g. "ctrl+c")
-  key: string (for press)
-  direction: "up" | "down" (for scroll)
-  description: string (for screen_find/screen_click)
-
-screen_process
-  text: string (required) — what to analyze or ask about the screen
-  angle: "screen" | "camera" (optional)
-
-send_message
-  receiver: string (required)
-  message_text: string (required)
-  platform: string (required)
-
-reminder
-  date: string YYYY-MM-DD (required)
-  time: string HH:MM (required)
-  message: string (required)
-
-desktop_control
-  action: "wallpaper" | "organize" | "clean" | "list" | "task" (required)
-  path: string (optional)
-  task: string (optional)
-
-youtube_video
-  action: "play" | "summarize" | "trending" (required)
-  query: string (for play)
-
-weather_report
-  city: string (required)
-
-flight_finder
-  origin: string (required)
-  destination: string (required)
-  date: string (required)
-
-code_helper
-  action: "write" | "edit" | "run" | "explain" (required)
-  description: string (required)
-  language: string (optional)
-  output_path: string (optional)
-  file_path: string (optional)
-
-dev_agent
-  description: string (required)
-  language: string (optional)
-EXAMPLES:
+_PROMPT_EXAMPLES = """EXAMPLES:
 
 Goal: "research mechanical engineering and save it to a notepad file"
 Steps:
 
 web_search | query: "mechanical engineering overview definition history"
 web_search | query: "mechanical engineering applications and future trends"
-file_controller | action: write, path: desktop, name: mechanical_engineering.txt, content: "MECHANICAL ENGINEERING RESEARCH\n\nThis file will be filled with web research results."
+file_controller | action: write, path: desktop, name: mechanical_engineering.txt, content: "MECHANICAL ENGINEERING RESEARCH\\n\\nThis file will be filled with web research results."
 
 Goal: "What is the price of Bitcoin"
 Steps:
@@ -160,6 +183,18 @@ OUTPUT — return ONLY valid JSON, no markdown, no explanation, no code blocks:
   ]
 }
 """
+
+
+def _build_planner_prompt() -> str:
+    """Construit le prompt de planification à partir des outils du registre ayant planner=True."""
+    docs = []
+    for spec in _REGISTRY.planner_tools():
+        if spec.name in _TOOL_DESCRIPTIONS:
+            docs.append(_TOOL_DESCRIPTIONS[spec.name])
+    return _PROMPT_HEADER + "\n" + "\n\n".join(docs) + "\n\n" + _PROMPT_EXAMPLES
+
+
+PLANNER_PROMPT = _build_planner_prompt()
 
 
 def create_plan(goal: str, context: str = "") -> dict:
