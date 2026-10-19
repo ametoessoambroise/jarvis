@@ -9,6 +9,16 @@ import socket
 import pytest
 
 
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    parser.addoption(
+        "--allow-network",
+        action="store_true",
+        default=False,
+        help="Allow network access during tests (for integration tests)",
+    )
+
+
 @pytest.fixture
 def block_network(monkeypatch):
     """Fixture to block network for specific tests."""
