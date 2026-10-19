@@ -65,43 +65,64 @@ def _get_paths() -> Paths:
 paths = _get_paths()
 
 
+def _parse_env_file(path: Path, name: str) -> str | None:
+    """Extract a secret value from a .env file."""
+    if not path.exists():
+        return None
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("#") or not line or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            if key.strip() == name:
+                value = val.strip()
+                if value:
+                    return value
+    except Exception:
+        return None
+    return None
+
+
 def get_secret(name: str) -> str:
     """
     Return a secret value from environment or .env file.
 
     Priority:
     1. Environment variable (highest)
-    2. .env file (project root)
-    3. .env file (profile directory, if frozen)
+    2. .env file in user profile (~/.jarvis/.env)
+    3. .env file in project root
+    4. Custom paths.secrets_env (e.g. for testing)
 
     Raises:
         RuntimeError: If the secret is not found or is empty.
     """
-    # Check environment variable first
+    # 1. Check environment variable first
     value = os.environ.get(name, "").strip()
     if value:
         return value
 
-    # Check .env file
-    env_file = paths.secrets_env
-    if env_file.exists():
-        try:
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line.startswith("#") or not line:
-                    continue
-                if "=" in line:
-                    key, val = line.split("=", 1)
-                    if key.strip() == name:
-                        value = val.strip()
-                        if value:
-                            return value
-        except Exception:
-            pass  # Fall through to error
+    # 2. Check user profile .env
+    profile_env = Path.home() / ".jarvis" / ".env"
+    val = _parse_env_file(profile_env, name)
+    if val:
+        return val
+
+    # 3. Check project root .env
+    root_env = paths.root / ".env"
+    val = _parse_env_file(root_env, name)
+    if val:
+        return val
+
+    # 4. Check paths.secrets_env (if custom/mocked in tests)
+    if paths.secrets_env != profile_env and paths.secrets_env != root_env:
+        val = _parse_env_file(paths.secrets_env, name)
+        if val:
+            return val
 
     raise RuntimeError(
         f"Secret '{name}' not found. "
-        f"Set the {name} environment variable or add it to {env_file}."
+        f"Set the {name} environment variable or add it to {paths.secrets_env}."
     )
 
 
@@ -115,6 +136,7 @@ def save_secret(name: str, value: str) -> None:
     - Allows descriptive names like GEMINI_API_KEY
     """
     env_file = paths.secrets_env
+    env_file.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     updated = False
 

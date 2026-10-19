@@ -19,20 +19,15 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
-def block_network(monkeypatch):
-    """Fixture to block network for specific tests."""
+@pytest.fixture(autouse=True)
+def block_network(request, monkeypatch):
+    """Auto-block network connections for all non-integration tests."""
+    if "integration" in request.keywords or request.config.getoption(
+        "--allow-network", default=False
+    ):
+        return
 
-    def blocked_socket(*args, **kwargs):
+    def blocked_connect(*args, **kwargs):
         raise RuntimeError("Network access is blocked in tests")
 
-    monkeypatch.setattr(socket.socket, blocked_socket)
-    return monkeypatch
-
-
-def pytest_collection_modifyitems(config, items):
-    """Auto-mark non-integration tests to block network."""
-    if not config.getoption("--allow-network"):
-        for item in items:
-            if "integration" not in item.keywords:
-                item.add_marker(pytest.mark.usefixtures("block_network"))
+    monkeypatch.setattr(socket.socket, "connect", blocked_connect)
