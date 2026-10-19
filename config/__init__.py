@@ -1,17 +1,25 @@
 # config/__init__.py
-import json, os
-from pathlib import Path
+# Compatibility shim delegating to unified configuration loader
+from config.settings import get_settings, get_os as _get_os
 
-_CONFIG_PATH = Path(__file__).parent / "api_keys.json"
 
 def get_config() -> dict:
-    with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Compatibility function: delegates to unified settings loader."""
+    return get_settings()
+
 
 def get_os() -> str:
     """Returns: 'windows' | 'mac' | 'linux'"""
-    return get_config().get("os_system", "windows").lower()
+    return _get_os()
 
-def is_windows() -> bool: return get_os() == "windows"
-def is_mac()     -> bool: return get_os() == "mac"
-def is_linux()   -> bool: return get_os() == "linux"
+
+def is_windows() -> bool:
+    return get_os() == "windows"
+
+
+def is_mac() -> bool:
+    return get_os() == "mac"
+
+
+def is_linux() -> bool:
+    return get_os() == "linux"

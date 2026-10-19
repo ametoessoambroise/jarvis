@@ -14,6 +14,8 @@ from typing import Optional
 import numpy as np
 import sounddevice as sd
 
+from config import settings
+
 try:
     import cv2
 
@@ -41,37 +43,6 @@ from google.genai import types as gtypes
 
 # Centralised API key — never duplicate this logic
 from core.utils import _get_api_key  # noqa: E402
-
-
-def _base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-_BASE = _base_dir()
-_CONFIG_PATH = _BASE / "config" / "api_keys.json"
-
-
-def _load_config() -> dict:
-    try:
-        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _save_config_key(key: str, value) -> None:
-    try:
-        cfg = _load_config()
-        cfg[key] = value
-        _CONFIG_PATH.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
-    except Exception as e:
-        print(f"[Vision] ⚠️  Could not save config key '{key}': {e}")
-
-
-def _get_os() -> str:
-    return _load_config().get("os_system", "windows").lower()
-
 
 _LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 _CHANNELS = 1
@@ -125,7 +96,7 @@ def _cv2_backend() -> int:
     """Return the best OpenCV camera backend for the current OS."""
     if not _CV2:
         return 0
-    os_name = _get_os()
+    os_name = settings.get_os()
     if os_name == "windows":
         return cv2.CAP_DSHOW
     if os_name == "mac":
@@ -157,12 +128,16 @@ def _detect_camera_index() -> int:
     for idx in range(6):
         if _probe_camera(idx, backend):
             print(f"[Vision] ✅ Camera found at index {idx}")
-            _save_config_key("camera_index", idx)
+            cfg = settings.get_settings()
+            cfg["camera_index"] = idx
+            settings.save_settings(cfg)
             return idx
         print(f"[Vision] ⚠️  Camera index {idx}: no usable frame")
 
     print("[Vision] ⚠️  No camera found — defaulting to index 0")
-    _save_config_key("camera_index", 0)
+    cfg = settings.get_settings()
+    cfg["camera_index"] = 0
+    settings.save_settings(cfg)
     return 0
 
 

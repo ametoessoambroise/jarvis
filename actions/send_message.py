@@ -5,16 +5,20 @@ import time
 import uuid
 from pathlib import Path
 
+from config import settings
+
 try:
     import pyautogui
+
     pyautogui.FAILSAFE = True
-    pyautogui.PAUSE    = 0.06
+    pyautogui.PAUSE = 0.06
     _PYAUTOGUI = True
 except ImportError:
     _PYAUTOGUI = False
 
 try:
     import pyperclip
+
     _PYPERCLIP = True
 except ImportError:
     _PYPERCLIP = False
@@ -22,23 +26,10 @@ except ImportError:
 try:
     from actions.send_message_utils import generate_tts, convert_audio, download_file
     from actions.image_utils import prepare_sticker
+
     _MEDIA_UTILS = True
 except Exception:
     _MEDIA_UTILS = False
-
-def _base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-def _get_os() -> str:
-    try:
-        cfg = json.loads(
-            (_base_dir() / "config" / "api_keys.json").read_text(encoding="utf-8")
-        )
-        return cfg.get("os_system", "windows").lower()
-    except Exception:
-        return "windows"
 
 
 def _require_pyautogui():
@@ -49,7 +40,7 @@ def _require_pyautogui():
 def _paste_text(text: str) -> None:
     _require_pyautogui()
 
-    os_name = _get_os()
+    os_name = settings.get_os()
     paste_hotkey = ("command", "v") if os_name == "mac" else ("ctrl", "v")
 
     if _PYPERCLIP:
@@ -63,7 +54,7 @@ def _paste_text(text: str) -> None:
 
 def _clear_and_paste(text: str) -> None:
     _require_pyautogui()
-    os_name = _get_os()
+    os_name = settings.get_os()
     select_all = ("command", "a") if os_name == "mac" else ("ctrl", "a")
     pyautogui.hotkey(*select_all)
     time.sleep(0.1)
@@ -71,9 +62,10 @@ def _clear_and_paste(text: str) -> None:
     time.sleep(0.1)
     _paste_text(text)
 
+
 def _open_app(app_name: str) -> bool:
     _require_pyautogui()
-    os_name = _get_os()
+    os_name = settings.get_os()
 
     try:
         if os_name == "windows":
@@ -88,17 +80,21 @@ def _open_app(app_name: str) -> bool:
         elif os_name == "mac":
             result = subprocess.run(
                 ["open", "-a", app_name],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 result = subprocess.run(
                     ["open", "-a", f"{app_name}.app"],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
             time.sleep(2.5)
             return result.returncode == 0
 
-        else: 
+        else:
             launched = False
             for launcher in [
                 ["gtk-launch", app_name.lower()],
@@ -124,17 +120,19 @@ def _open_app(app_name: str) -> bool:
 
 def _open_browser_url(url: str) -> bool:
     import webbrowser
+
     try:
         webbrowser.open(url)
-        time.sleep(4.0) 
+        time.sleep(4.0)
         return True
     except Exception as e:
         print(f"[SendMessage] ⚠️ Could not open browser: {e}")
         return False
 
+
 def _search_in_app(query: str) -> None:
     _require_pyautogui()
-    os_name = _get_os()
+    os_name = settings.get_os()
     search_hotkey = ("command", "f") if os_name == "mac" else ("ctrl", "f")
 
     pyautogui.hotkey(*search_hotkey)
@@ -142,12 +140,13 @@ def _search_in_app(query: str) -> None:
     _clear_and_paste(query)
     time.sleep(1.0)
 
+
 def _copy_selection_to_clipboard() -> str:
     _require_pyautogui()
     if not _PYPERCLIP:
         raise RuntimeError("Pyperclip is required to copy chat history.")
 
-    os_name = _get_os()
+    os_name = settings.get_os()
     copy_hotkey = ("command", "c") if os_name == "mac" else ("ctrl", "c")
     pyautogui.hotkey(*copy_hotkey)
     time.sleep(0.25)
@@ -166,7 +165,7 @@ def _capture_whatsapp_chat_history(receiver: str) -> str:
     time.sleep(1.5)
 
     try:
-        os_name = _get_os()
+        os_name = settings.get_os()
         select_all = ("command", "a") if os_name == "mac" else ("ctrl", "a")
         pyautogui.hotkey(*select_all)
         time.sleep(0.25)
@@ -186,7 +185,9 @@ def _summarize_chat_history(history_text: str, max_lines: int = 20) -> str:
     return "\n".join(lines[-max_lines:])
 
 
-def _desktop_send(app_name: str, receiver: str, message: str, chat_ready: bool = False) -> str:
+def _desktop_send(
+    app_name: str, receiver: str, message: str, chat_ready: bool = False
+) -> str:
     if not chat_ready and not _open_app(app_name):
         return f"Could not open {app_name}."
 
@@ -241,9 +242,13 @@ def _ensure_attachment_path(item: dict, temp_dir: Path) -> Path:
 
     if not path_value and item_type == "audio" and tts_flag:
         if not item.get("caption"):
-            raise ValueError("TTS audio requires caption text or message_text to generate audio.")
+            raise ValueError(
+                "TTS audio requires caption text or message_text to generate audio."
+            )
         output_path = temp_dir / f"tts_{uuid.uuid4().hex}.mp3"
-        return Path(generate_tts(item.get("caption"), str(output_path), lang="fr", format="mp3"))
+        return Path(
+            generate_tts(item.get("caption"), str(output_path), lang="fr", format="mp3")
+        )
 
     if not path_value:
         raise ValueError("Attachment must include a local path or URL.")
@@ -263,7 +268,13 @@ def _ensure_attachment_path(item: dict, temp_dir: Path) -> Path:
     return path
 
 
-def _send_with_attachments(app_name: str, receiver: str, message: str, attachments: list[dict], chat_ready: bool = False) -> str:
+def _send_with_attachments(
+    app_name: str,
+    receiver: str,
+    message: str,
+    attachments: list[dict],
+    chat_ready: bool = False,
+) -> str:
     if not _MEDIA_UTILS:
         return "Media utilities are not available; cannot prepare attachments."
 
@@ -300,34 +311,69 @@ def _send_with_attachments(app_name: str, receiver: str, message: str, attachmen
     return f"Sent {len(attachment_paths)} attachment(s) to {receiver} via {app_name}."
 
 
-def _send_whatsapp(receiver: str, message: str, attachments: list[dict] | None = None, chat_ready: bool = False) -> str:
+def _send_whatsapp(
+    receiver: str,
+    message: str,
+    attachments: list[dict] | None = None,
+    chat_ready: bool = False,
+) -> str:
     if attachments:
-        return _send_with_attachments("WhatsApp", receiver, message, attachments, chat_ready=chat_ready)
+        return _send_with_attachments(
+            "WhatsApp", receiver, message, attachments, chat_ready=chat_ready
+        )
 
     return _desktop_send("WhatsApp", receiver, message, chat_ready=chat_ready)
 
 
-def _send_telegram(receiver: str, message: str, attachments: list[dict] | None = None, chat_ready: bool = False) -> str:
+def _send_telegram(
+    receiver: str,
+    message: str,
+    attachments: list[dict] | None = None,
+    chat_ready: bool = False,
+) -> str:
     if attachments:
-        return _send_with_attachments("Telegram", receiver, message, attachments, chat_ready=chat_ready)
+        return _send_with_attachments(
+            "Telegram", receiver, message, attachments, chat_ready=chat_ready
+        )
     return _desktop_send("Telegram", receiver, message, chat_ready=chat_ready)
 
 
-def _send_signal(receiver: str, message: str, attachments: list[dict] | None = None, chat_ready: bool = False) -> str:
+def _send_signal(
+    receiver: str,
+    message: str,
+    attachments: list[dict] | None = None,
+    chat_ready: bool = False,
+) -> str:
     if attachments:
-        return _send_with_attachments("Signal", receiver, message, attachments, chat_ready=chat_ready)
+        return _send_with_attachments(
+            "Signal", receiver, message, attachments, chat_ready=chat_ready
+        )
     return _desktop_send("Signal", receiver, message, chat_ready=chat_ready)
 
 
-def _send_discord(receiver: str, message: str, attachments: list[dict] | None = None, chat_ready: bool = False) -> str:
+def _send_discord(
+    receiver: str,
+    message: str,
+    attachments: list[dict] | None = None,
+    chat_ready: bool = False,
+) -> str:
     if attachments:
-        return _send_with_attachments("Discord", receiver, message, attachments, chat_ready=chat_ready)
+        return _send_with_attachments(
+            "Discord", receiver, message, attachments, chat_ready=chat_ready
+        )
     return _desktop_send("Discord", receiver, message, chat_ready=chat_ready)
 
 
-def _send_instagram(receiver: str, message: str, attachments: list[dict] | None = None, chat_ready: bool = False) -> str:
+def _send_instagram(
+    receiver: str,
+    message: str,
+    attachments: list[dict] | None = None,
+    chat_ready: bool = False,
+) -> str:
     if attachments:
-        return _send_with_attachments("Instagram", receiver, message, attachments, chat_ready=chat_ready)
+        return _send_with_attachments(
+            "Instagram", receiver, message, attachments, chat_ready=chat_ready
+        )
 
     _require_pyautogui()
 
@@ -339,7 +385,7 @@ def _send_instagram(receiver: str, message: str, attachments: list[dict] | None 
 
     pyautogui.press("down")
     time.sleep(0.3)
-    pyautogui.press("enter")   
+    pyautogui.press("enter")
     time.sleep(0.4)
 
     for _ in range(4):
@@ -357,19 +403,22 @@ def _send_instagram(receiver: str, message: str, attachments: list[dict] | None 
 
 
 _PLATFORM_MAP = [
-    ({"whatsapp", "wp", "wapp"},              _send_whatsapp),
-    ({"telegram", "tg"},                      _send_telegram),
-    ({"instagram", "ig", "insta"},            _send_instagram),
-    ({"signal"},                               _send_signal),
-    ({"discord"},                              _send_discord),
+    ({"whatsapp", "wp", "wapp"}, _send_whatsapp),
+    ({"telegram", "tg"}, _send_telegram),
+    ({"instagram", "ig", "insta"}, _send_instagram),
+    ({"signal"}, _send_signal),
+    ({"discord"}, _send_discord),
 ]
+
 
 def _resolve_platform(platform_str: str):
     key = platform_str.lower().strip()
     for keywords, handler in _PLATFORM_MAP:
         if any(k in key for k in keywords):
             return handler
-    return lambda r, m, attachments=None, chat_ready=False: _desktop_send(platform_str.strip().title(), r, m, chat_ready=chat_ready)
+    return lambda r, m, attachments=None, chat_ready=False: _desktop_send(
+        platform_str.strip().title(), r, m, chat_ready=chat_ready
+    )
 
 
 def send_message(
@@ -378,11 +427,11 @@ def send_message(
     player=None,
     session_memory=None,
 ) -> str:
-    params       = parameters or {}
-    receiver     = params.get("receiver", "").strip()
+    params = parameters or {}
+    receiver = params.get("receiver", "").strip()
     message_text = params.get("message_text", "").strip()
-    platform     = params.get("platform", "whatsapp").strip()
-    attachments  = params.get("attachments") or []
+    platform = params.get("platform", "whatsapp").strip()
+    attachments = params.get("attachments") or []
 
     if not receiver:
         return "Please specify a recipient."
@@ -399,14 +448,19 @@ def send_message(
     chat_ready = bool(params.get("chat_ready", False))
     try:
         handler = _resolve_platform(platform)
-        result  = handler(receiver, message_text, attachments if attachments else None, chat_ready=chat_ready)
+        result = handler(
+            receiver,
+            message_text,
+            attachments if attachments else None,
+            chat_ready=chat_ready,
+        )
     except Exception as e:
         result = f"Could not send message: {e}"
 
-    print(f"[SendMessage] {'✅' if 'sent' in result.lower() or 'attachment' in result.lower() else '❌'} {result}")
+    print(
+        f"[SendMessage] {'✅' if 'sent' in result.lower() or 'attachment' in result.lower() else '❌'} {result}"
+    )
     if player:
         player.write_log(f"[msg] {result}")
 
     return result
-
-

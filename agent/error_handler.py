@@ -4,17 +4,12 @@ import sys
 from pathlib import Path
 from enum import Enum
 
+from config import settings
+
 # Centralised API key — never duplicate this logic
 from core.utils import _get_api_key  # noqa: E402
 
-
-def get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-BASE_DIR = get_base_dir()
+BASE_DIR = settings.paths.root
 
 
 class ErrorDecision(Enum):

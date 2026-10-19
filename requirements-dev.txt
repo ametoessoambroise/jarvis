@@ -1,0 +1,6 @@
+# Development dependencies for JARVIS
+# Install with: pip install -r requirements-dev.txt
+
+pytest>=8.0.0
+pytest-qt>=4.0.0
+ruff>=0.1.0

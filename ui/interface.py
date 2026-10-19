@@ -13,65 +13,100 @@ from pathlib import Path
 
 import psutil
 
+from config import settings
+
 from PyQt6.QtCore import (
-    QEasingCurve, QMimeData, QObject, QPointF, QRectF, QSize, Qt,
-    QTimer, QUrl, pyqtSignal,
+    QEasingCurve,
+    QMimeData,
+    QObject,
+    QPointF,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    QUrl,
+    pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QBrush, QColor, QDragEnterEvent, QDropEvent, QFont, QFontDatabase,
-    QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
-    QRadialGradient, QShortcut,
+    QBrush,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QFont,
+    QFontDatabase,
+    QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRadialGradient,
+    QShortcut,
 )
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
-    QVBoxLayout, QWidget, QProgressBar,
+    QApplication,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    QProgressBar,
 )
+
 # Import refactored components
 from ui.metrics import metrics
 from ui.hud_canvas import HudCanvas
 from ui.components.metric_bar import MetricBar
 from ui.components.log_widget import LogWidget
 
+
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent
 
-BASE_DIR   = _base_dir()
+
+BASE_DIR = _base_dir()
 CONFIG_DIR = BASE_DIR / "config"
-API_FILE   = CONFIG_DIR / "api_keys.json"
+# Deprecated: removed, using unified config loader
 
 _DEFAULT_W, _DEFAULT_H = 980, 700
-_MIN_W,     _MIN_H     = 820, 580
-_LEFT_W  = 148
+_MIN_W, _MIN_H = 820, 580
+_LEFT_W = 148
 _RIGHT_W = 340
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    BG        = "#00060a"
-    PANEL     = "#010d14"
-    PANEL2    = "#010f18"
-    BORDER    = "#0d3347"
-    BORDER_B  = "#1a5c7a"
-    BORDER_A  = "#0f4060"
-    PRI       = "#00d4ff"
-    PRI_DIM   = "#007a99"
-    PRI_GHO   = "#001f2e"
-    ACC       = "#ff6b00"
-    ACC2      = "#ffcc00"
-    GREEN     = "#00ff88"
-    GREEN_D   = "#00aa55"
-    RED       = "#ff3355"
-    MUTED_C   = "#ff3366"
-    TEXT      = "#8ffcff"
-    TEXT_DIM  = "#3a8a9a"
-    TEXT_MED  = "#5ab8cc"
-    WHITE     = "#d8f8ff"
-    DARK      = "#000d14"
-    BAR_BG    = "#011520"
+    BG = "#00060a"
+    PANEL = "#010d14"
+    PANEL2 = "#010f18"
+    BORDER = "#0d3347"
+    BORDER_B = "#1a5c7a"
+    BORDER_A = "#0f4060"
+    PRI = "#00d4ff"
+    PRI_DIM = "#007a99"
+    PRI_GHO = "#001f2e"
+    ACC = "#ff6b00"
+    ACC2 = "#ffcc00"
+    GREEN = "#00ff88"
+    GREEN_D = "#00aa55"
+    RED = "#ff3355"
+    MUTED_C = "#ff3366"
+    TEXT = "#8ffcff"
+    TEXT_DIM = "#3a8a9a"
+    TEXT_MED = "#5ab8cc"
+    WHITE = "#d8f8ff"
+    DARK = "#000d14"
+    BAR_BG = "#011520"
 
 
 def qcol(h: str, a: int = 255) -> QColor:
@@ -90,25 +125,32 @@ def _fmt_size(num: int) -> str:
 
 def _file_category(path: Path) -> str:
     ext = path.suffix.lower().lstrip(".")
-    if ext in ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]: return "image"
-    if ext in ["mp4", "avi", "mov", "mkv", "wmv", "webm"]: return "video"
-    if ext in ["mp3", "wav", "ogg", "m4a", "aac", "flac"]: return "audio"
-    if ext in ["pdf", "docx", "txt", "md", "pptx"]: return "document"
-    if ext in ["py", "js", "ts", "html", "css", "java", "cpp", "go"]: return "code"
-    if ext in ["csv", "xlsx", "json", "xml"]: return "data"
-    if ext in ["zip", "rar", "tar", "gz", "7z"]: return "archive"
+    if ext in ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]:
+        return "image"
+    if ext in ["mp4", "avi", "mov", "mkv", "wmv", "webm"]:
+        return "video"
+    if ext in ["mp3", "wav", "ogg", "m4a", "aac", "flac"]:
+        return "audio"
+    if ext in ["pdf", "docx", "txt", "md", "pptx"]:
+        return "document"
+    if ext in ["py", "js", "ts", "html", "css", "java", "cpp", "go"]:
+        return "code"
+    if ext in ["csv", "xlsx", "json", "xml"]:
+        return "data"
+    if ext in ["zip", "rar", "tar", "gz", "7z"]:
+        return "archive"
     return "unknown"
 
 
 _FILE_ICONS = {
-    "image":    ("🖼", C.GREEN),
-    "video":    ("🎬", C.ACC),
-    "audio":    ("🎵", C.ACC2),
+    "image": ("🖼", C.GREEN),
+    "video": ("🎬", C.ACC),
+    "audio": ("🎵", C.ACC2),
     "document": ("📄", C.PRI),
-    "code":     ("💻", C.WHITE),
-    "data":     ("📊", C.GREEN_D),
-    "archive":  ("📦", C.TEXT_MED),
-    "unknown":  ("📁", C.TEXT_DIM),
+    "code": ("💻", C.WHITE),
+    "data": ("📊", C.GREEN_D),
+    "archive": ("📦", C.TEXT_MED),
+    "unknown": ("📁", C.TEXT_DIM),
 }
 
 
@@ -181,12 +223,14 @@ class FileDropZone(QWidget):
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select a file for JARVIS", str(Path.home()),
+            self,
+            "Select a file for JARVIS",
+            str(Path.home()),
             "All Files (*.*);;Images (*.jpg *.jpeg *.png *.gif *.webp *.bmp *.svg);;"
             "Documents (*.pdf *.docx *.txt *.md *.pptx);;Data (*.csv *.xlsx *.json *.xml);;"
             "Code (*.py *.js *.ts *.html *.css *.java *.cpp *.go);;"
             "Audio (*.mp3 *.wav *.ogg *.m4a *.aac *.flac);;"
-            "Video (*.mp4 *.avi *.mov *.mkv *.wmv *.webm);;Archives (*.zip *.rar *.tar *.gz *.7z)"
+            "Video (*.mp4 *.avi *.mov *.mkv *.wmv *.webm);;Archives (*.zip *.rar *.tar *.gz *.7z)",
         )
         if path:
             self._set_file(path)
@@ -197,7 +241,6 @@ class FileDropZone(QWidget):
         self.update()
 
 
-
 class _DropCanvas(QWidget):
     def __init__(self, zone: FileDropZone):
         super().__init__(zone)
@@ -206,45 +249,63 @@ class _DropCanvas(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        z    = self._z
+        z = self._z
         W, H = self.width(), self.height()
-        pad  = 6
+        pad = 6
         rect = QRectF(pad, pad, W - pad * 2, H - pad * 2)
 
-        bg_col = qcol("#001a24" if z._drag_over else ("#001218" if z._hovering else C.PANEL))
-        p.setBrush(QBrush(bg_col)); p.setPen(Qt.PenStyle.NoPen)
+        bg_col = qcol(
+            "#001a24" if z._drag_over else ("#001218" if z._hovering else C.PANEL)
+        )
+        p.setBrush(QBrush(bg_col))
+        p.setPen(Qt.PenStyle.NoPen)
         p.drawRoundedRect(rect, 6, 6)
 
-        if z._current_file:   border_col = qcol(C.GREEN, 200)
-        elif z._drag_over:    border_col = qcol(C.PRI, 230)
-        elif z._hovering:     border_col = qcol(C.BORDER_B, 200)
-        else:                 border_col = qcol(C.BORDER, 160)
+        if z._current_file:
+            border_col = qcol(C.GREEN, 200)
+        elif z._drag_over:
+            border_col = qcol(C.PRI, 230)
+        elif z._hovering:
+            border_col = qcol(C.BORDER_B, 200)
+        else:
+            border_col = qcol(C.BORDER, 160)
 
         pen = QPen(border_col, 1.5, Qt.PenStyle.DashLine)
         pen.setDashOffset(z._dash_offset)
-        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(rect, 6, 6)
 
-        if z._current_file:   self._paint_file(p, W, H)
-        elif z._drag_over:    self._paint_drag_over(p, W, H)
-        else:                 self._paint_idle(p, W, H, z._hovering)
+        if z._current_file:
+            self._paint_file(p, W, H)
+        elif z._drag_over:
+            self._paint_drag_over(p, W, H)
+        else:
+            self._paint_idle(p, W, H, z._hovering)
 
     def _paint_idle(self, p, W, H, hover):
         cx, cy = W / 2, H / 2
         col = qcol(C.PRI_DIM if not hover else C.PRI)
-        p.setPen(QPen(col, 2)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawLine(QPointF(cx, cy - 14), QPointF(cx, cy + 4))
         p.drawLine(QPointF(cx - 8, cy - 6), QPointF(cx, cy - 14))
         p.drawLine(QPointF(cx + 8, cy - 6), QPointF(cx, cy - 14))
         p.drawLine(QPointF(cx - 14, cy + 4), QPointF(cx + 14, cy + 4))
         p.setFont(QFont("Courier New", 8))
         p.setPen(QPen(qcol(C.PRI_DIM if not hover else C.TEXT), 1))
-        p.drawText(QRectF(0, cy + 8, W, 16), Qt.AlignmentFlag.AlignCenter,
-                   "Drop file here  or  Click to Browse")
+        p.drawText(
+            QRectF(0, cy + 8, W, 16),
+            Qt.AlignmentFlag.AlignCenter,
+            "Drop file here  or  Click to Browse",
+        )
         p.setFont(QFont("Courier New", 7))
         p.setPen(QPen(qcol("#1a4a5a"), 1))
-        p.drawText(QRectF(0, cy + 24, W, 14), Qt.AlignmentFlag.AlignCenter,
-                   "Images · Video · Audio · PDF · Docs · Code · Data")
+        p.drawText(
+            QRectF(0, cy + 24, W, 14),
+            Qt.AlignmentFlag.AlignCenter,
+            "Images · Video · Audio · PDF · Docs · Code · Data",
+        )
 
     def _paint_drag_over(self, p, W, H):
         cx, cy = W / 2, H / 2
@@ -253,17 +314,21 @@ class _DropCanvas(QWidget):
         p.drawText(QRectF(0, cy - 24, W, 32), Qt.AlignmentFlag.AlignCenter, "⬇")
         p.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.PRI), 1))
-        p.drawText(QRectF(0, cy + 12, W, 16), Qt.AlignmentFlag.AlignCenter, "Release to load")
+        p.drawText(
+            QRectF(0, cy + 12, W, 16), Qt.AlignmentFlag.AlignCenter, "Release to load"
+        )
 
     def _paint_file(self, p, W, H):
         path = Path(self._z._current_file)
-        cat  = _file_category(path)
+        cat = _file_category(path)
         icon, icon_col = _FILE_ICONS.get(cat, _FILE_ICONS["unknown"])
         size_str = _fmt_size(path.stat().st_size)
-        ext_str  = path.suffix.upper().lstrip(".") or "FILE"
+        ext_str = path.suffix.upper().lstrip(".") or "FILE"
 
         block_x, block_w = 10, 60
-        p.setFont(QFont("Segoe UI Emoji", 22) if _OS == "Windows" else QFont("Arial", 22))
+        p.setFont(
+            QFont("Segoe UI Emoji", 22) if _OS == "Windows" else QFont("Arial", 22)
+        )
         p.setPen(QPen(qcol(icon_col), 1))
         p.drawText(QRectF(block_x, 0, block_w, H), Qt.AlignmentFlag.AlignCenter, icon)
 
@@ -273,21 +338,30 @@ class _DropCanvas(QWidget):
         p.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.WHITE), 1))
         name = path.name if len(path.name) <= 34 else path.name[:31] + "..."
-        p.drawText(QRectF(tx, H * 0.18, tw, 16),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
+        p.drawText(
+            QRectF(tx, H * 0.18, tw, 16),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            name,
+        )
 
         p.setFont(QFont("Courier New", 7))
         p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(tx, H * 0.18 + 18, tw, 14),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   f"{ext_str}  ·  {size_str}")
+        p.drawText(
+            QRectF(tx, H * 0.18 + 18, tw, 14),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            f"{ext_str}  ·  {size_str}",
+        )
 
         p.setFont(QFont("Courier New", 6))
         p.setPen(QPen(qcol("#1e5c6a"), 1))
         par = str(path.parent)
-        if len(par) > 42: par = "…" + par[-41:]
-        p.drawText(QRectF(tx, H * 0.18 + 34, tw, 12),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, par)
+        if len(par) > 42:
+            par = "…" + par[-41:]
+        p.drawText(
+            QRectF(tx, H * 0.18 + 34, tw, 12),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            par,
+        )
 
         p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.RED, 180), 1))
@@ -315,34 +389,49 @@ class SetupOverlay(QWidget):
             }}
         """)
 
-        detected = {"darwin": "mac", "windows": "windows"}.get(
-            _OS.lower(), "linux"
-        )
+        detected = {"darwin": "mac", "windows": "windows"}.get(_OS.lower(), "linux")
         self._sel_os = detected
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 22, 30, 22)
         layout.setSpacing(8)
 
-        def _lbl(txt, font_size=9, bold=False, color=C.PRI,
-                 align=Qt.AlignmentFlag.AlignCenter):
+        def _lbl(
+            txt,
+            font_size=9,
+            bold=False,
+            color=C.PRI,
+            align=Qt.AlignmentFlag.AlignCenter,
+        ):
             w = QLabel(txt)
             w.setAlignment(align)
-            w.setFont(QFont("Courier New", font_size,
-                            QFont.Weight.Bold if bold else QFont.Weight.Normal))
+            w.setFont(
+                QFont(
+                    "Courier New",
+                    font_size,
+                    QFont.Weight.Bold if bold else QFont.Weight.Normal,
+                )
+            )
             w.setStyleSheet(f"color: {color}; background: transparent;")
             return w
 
         layout.addWidget(_lbl("◈  INITIALISATION REQUIRED", 13, True))
-        layout.addWidget(_lbl("Configure J.A.R.V.I.S. before first boot.", 9, color=C.PRI_DIM))
+        layout.addWidget(
+            _lbl("Configure J.A.R.V.I.S. before first boot.", 9, color=C.PRI_DIM)
+        )
         layout.addSpacing(6)
 
-        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color: {C.BORDER};"); layout.addWidget(sep)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {C.BORDER};")
+        layout.addWidget(sep)
         layout.addSpacing(4)
 
-        layout.addWidget(_lbl("GEMINI API KEY", 8, color=C.TEXT_DIM,
-                               align=Qt.AlignmentFlag.AlignLeft))
+        layout.addWidget(
+            _lbl(
+                "GEMINI API KEY", 8, color=C.TEXT_DIM, align=Qt.AlignmentFlag.AlignLeft
+            )
+        )
         self._key_input = QLineEdit()
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._key_input.setPlaceholderText("AIza…")
@@ -358,19 +447,38 @@ class SetupOverlay(QWidget):
         layout.addWidget(self._key_input)
         layout.addSpacing(12)
 
-        sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet(f"color: {C.BORDER};"); layout.addWidget(sep2)
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet(f"color: {C.BORDER};")
+        layout.addWidget(sep2)
         layout.addSpacing(4)
 
-        layout.addWidget(_lbl("OPERATING SYSTEM", 8, color=C.TEXT_DIM,
-                               align=Qt.AlignmentFlag.AlignLeft))
+        layout.addWidget(
+            _lbl(
+                "OPERATING SYSTEM",
+                8,
+                color=C.TEXT_DIM,
+                align=Qt.AlignmentFlag.AlignLeft,
+            )
+        )
         det_name = {"windows": "Windows", "mac": "macOS", "linux": "Linux"}[detected]
-        layout.addWidget(_lbl(f"Auto-detected: {det_name}", 8, color=C.ACC2,
-                               align=Qt.AlignmentFlag.AlignLeft))
+        layout.addWidget(
+            _lbl(
+                f"Auto-detected: {det_name}",
+                8,
+                color=C.ACC2,
+                align=Qt.AlignmentFlag.AlignLeft,
+            )
+        )
 
-        os_row = QHBoxLayout(); os_row.setSpacing(6)
+        os_row = QHBoxLayout()
+        os_row.setSpacing(6)
         self._os_btns: dict[str, QPushButton] = {}
-        for key, label in [("windows","⊞  Windows"),("mac","  macOS"),("linux","🐧  Linux")]:
+        for key, label in [
+            ("windows", "⊞  Windows"),
+            ("mac", "  macOS"),
+            ("linux", "🐧  Linux"),
+        ]:
             btn = QPushButton(label)
             btn.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
             btn.setFixedHeight(32)
@@ -400,7 +508,11 @@ class SetupOverlay(QWidget):
 
     def _sel(self, key: str):
         self._sel_os = key
-        pal = {"windows":(C.PRI,"#001a22"),"mac":(C.ACC2,"#1a1400"),"linux":(C.GREEN,"#001a0d")}
+        pal = {
+            "windows": (C.PRI, "#001a22"),
+            "mac": (C.ACC2, "#1a1400"),
+            "linux": (C.GREEN, "#001a0d"),
+        }
         for k, btn in self._os_btns.items():
             if k == key:
                 fg, bg = pal[k]
@@ -423,15 +535,15 @@ class SetupOverlay(QWidget):
         key = self._key_input.text().strip()
         if not key:
             self._key_input.setStyleSheet(
-                self._key_input.styleSheet() +
-                f" QLineEdit {{ border: 1px solid {C.RED}; }}"
+                self._key_input.styleSheet()
+                + f" QLineEdit {{ border: 1px solid {C.RED}; }}"
             )
             return
         self.done.emit(key, self._sel_os)
 
 
 class MainWindow(QMainWindow):
-    _log_sig   = pyqtSignal(str)
+    _log_sig = pyqtSignal(str)
     _state_sig = pyqtSignal(str)
 
     def __init__(self, face_path: str):
@@ -442,12 +554,12 @@ class MainWindow(QMainWindow):
 
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(
-            (screen.width()  - _DEFAULT_W) // 2,
+            (screen.width() - _DEFAULT_W) // 2,
             (screen.height() - _DEFAULT_H) // 2,
         )
 
-        self.on_text_command  = None
-        self._muted           = False
+        self.on_text_command = None
+        self._muted = False
         self._current_file: str | None = None
 
         central = QWidget()
@@ -467,7 +579,9 @@ class MainWindow(QMainWindow):
         body.addWidget(self._left_panel, stretch=0)
 
         self.hud = HudCanvas(face_path)
-        self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.hud.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         body.addWidget(self.hud, stretch=5)
 
         self._right_panel = self._build_right_panel()
@@ -512,9 +626,10 @@ class MainWindow(QMainWindow):
             ow, oh = 460, 390
             cw = self.centralWidget()
             self._overlay.setGeometry(
-                (cw.width()  - ow) // 2,
+                (cw.width() - ow) // 2,
                 (cw.height() - oh) // 2,
-                ow, oh,
+                ow,
+                oh,
             )
 
     def _update_metrics(self):
@@ -553,7 +668,7 @@ class MainWindow(QMainWindow):
             self._bar_tmp.set_value(0, "N/A")
 
         try:
-            boot_t  = psutil.boot_time()
+            boot_t = psutil.boot_time()
             elapsed = time.time() - boot_t
             h = int(elapsed // 3600)
             m = int((elapsed % 3600) // 60)
@@ -566,7 +681,6 @@ class MainWindow(QMainWindow):
             self._proc_lbl.setText(f"PROC  {proc_count}")
         except Exception:
             self._proc_lbl.setText("PROC  --")
-
 
     def _build_header(self) -> QWidget:
         w = QWidget()
@@ -584,7 +698,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(_badge("MARK XXXIX", C.PRI_DIM))
         lay.addStretch()
 
-        mid = QVBoxLayout(); mid.setSpacing(1)
+        mid = QVBoxLayout()
+        mid.setSpacing(1)
         title = QLabel("J.A.R.V.I.S")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Courier New", 17, QFont.Weight.Bold))
@@ -598,7 +713,8 @@ class MainWindow(QMainWindow):
         lay.addLayout(mid)
         lay.addStretch()
 
-        right_col = QVBoxLayout(); right_col.setSpacing(2)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(2)
         self._clock_lbl = QLabel("00:00:00")
         self._clock_lbl.setFont(QFont("Courier New", 14, QFont.Weight.Bold))
         self._clock_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
@@ -626,8 +742,10 @@ class MainWindow(QMainWindow):
 
         hdr = QLabel("◈ SYS MONITOR")
         hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"color: {C.PRI}; background: transparent; "
-                          f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
+        hdr.setStyleSheet(
+            f"color: {C.PRI}; background: transparent; "
+            f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;"
+        )
         lay.addWidget(hdr)
         lay.addSpacing(2)
 
@@ -637,8 +755,13 @@ class MainWindow(QMainWindow):
         self._bar_gpu = MetricBar("GPU", C.ACC)
         self._bar_tmp = MetricBar("TMP", "#ff6688")
 
-        for bar in [self._bar_cpu, self._bar_mem, self._bar_net,
-                    self._bar_gpu, self._bar_tmp]:
+        for bar in [
+            self._bar_cpu,
+            self._bar_mem,
+            self._bar_net,
+            self._bar_gpu,
+            self._bar_tmp,
+        ]:
             lay.addWidget(bar)
 
         lay.addSpacing(4)
@@ -653,15 +776,21 @@ class MainWindow(QMainWindow):
 
         self._uptime_lbl = QLabel("UP  --:--")
         self._uptime_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        self._uptime_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent; border: none;")
+        self._uptime_lbl.setStyleSheet(
+            f"color: {C.GREEN}; background: transparent; border: none;"
+        )
         ip_lay.addWidget(self._uptime_lbl)
 
         self._proc_lbl = QLabel("PROC  --")
         self._proc_lbl.setFont(QFont("Courier New", 8))
-        self._proc_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+        self._proc_lbl.setStyleSheet(
+            f"color: {C.TEXT_MED}; background: transparent; border: none;"
+        )
         ip_lay.addWidget(self._proc_lbl)
 
-        os_name = {"Windows": "WIN", "Darwin": "macOS", "Linux": "LINUX"}.get(_OS, _OS.upper())
+        os_name = {"Windows": "WIN", "Darwin": "macOS", "Linux": "LINUX"}.get(
+            _OS, _OS.upper()
+        )
         os_lbl = QLabel(f"OS  {os_name}")
         os_lbl.setFont(QFont("Courier New", 8))
         os_lbl.setStyleSheet(f"color: {C.ACC2}; background: transparent; border: none;")
@@ -671,9 +800,9 @@ class MainWindow(QMainWindow):
         lay.addStretch()
 
         for txt, col in [
-            ("AI CORE\nACTIVE",     C.GREEN),
-            ("SEC\nCLEARED",        C.PRI),
-            ("PROTOCOL\nXXXVIII",   C.TEXT_DIM),
+            ("AI CORE\nACTIVE", C.GREEN),
+            ("SEC\nCLEARED", C.PRI),
+            ("PROTOCOL\nXXXVIII", C.TEXT_DIM),
         ]:
             lbl = QLabel(txt)
             lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
@@ -685,6 +814,7 @@ class MainWindow(QMainWindow):
             lay.addWidget(lbl)
 
         return w
+
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
         w.setFixedWidth(_RIGHT_W)
@@ -703,7 +833,8 @@ class MainWindow(QMainWindow):
         self._log = LogWidget()
         lay.addWidget(self._log, stretch=1)
 
-        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         lay.addWidget(sep)
 
@@ -718,7 +849,8 @@ class MainWindow(QMainWindow):
         self._file_hint.setWordWrap(True)
         lay.addWidget(self._file_hint)
 
-        sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         lay.addWidget(sep2)
 
@@ -752,7 +884,8 @@ class MainWindow(QMainWindow):
         return w
 
     def _build_input_row(self) -> QHBoxLayout:
-        row = QHBoxLayout(); row.setSpacing(5)
+        row = QHBoxLayout()
+        row.setSpacing(5)
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type a command or question…")
         self._input.setFont(QFont("Courier New", 9))
@@ -786,10 +919,12 @@ class MainWindow(QMainWindow):
         w = QWidget()
         w.setFixedHeight(22)
         w.setStyleSheet(f"background: {C.DARK}; border-top: 1px solid {C.BORDER};")
-        lay = QHBoxLayout(w); lay.setContentsMargins(14, 0, 14, 0)
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(14, 0, 14, 0)
 
         def _fl(txt, color=C.TEXT_MED):
-            l = QLabel(txt); l.setFont(QFont("Courier New", 7))
+            l = QLabel(txt)
+            l.setFont(QFont("Courier New", 7))
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
@@ -802,11 +937,13 @@ class MainWindow(QMainWindow):
 
     def _on_file_selected(self, path: str):
         self._current_file = path
-        p    = Path(path)
-        cat  = _file_category(p)
+        p = Path(path)
+        cat = _file_category(p)
         icon, _ = _FILE_ICONS.get(cat, _FILE_ICONS["unknown"])
         size = _fmt_size(p.stat().st_size)
-        self._file_hint.setText(f"{icon}  {p.name}  ·  {size}  ·  Tell JARVIS what to do with it")
+        self._file_hint.setText(
+            f"{icon}  {p.name}  ·  {size}  ·  Tell JARVIS what to do with it"
+        )
         self._log.append_log(f"FILE: {p.name} ({size}) loaded")
         if self.on_text_command:
             msg = (
@@ -815,7 +952,9 @@ class MainWindow(QMainWindow):
                 f"Briefly tell the user you can see the file '{p.name}' "
                 f"({size}) has been uploaded and ask what they'd like to do with it."
             )
-            threading.Thread(target=self.on_text_command, args=(msg,), daemon=True).start()
+            threading.Thread(
+                target=self.on_text_command, args=(msg,), daemon=True
+            ).start()
 
     def _toggle_mute(self):
         self._muted = not self._muted
@@ -849,21 +988,28 @@ class MainWindow(QMainWindow):
 
     def _send(self):
         txt = self._input.text().strip()
-        if not txt: return
+        if not txt:
+            return
         self._input.clear()
         self._log.append_log(f"You: {txt}")
         if self.on_text_command:
-            threading.Thread(target=self.on_text_command, args=(txt,), daemon=True).start()
+            threading.Thread(
+                target=self.on_text_command, args=(txt,), daemon=True
+            ).start()
 
     def _apply_state(self, state: str):
-        self.hud.state    = state
-        self.hud.speaking = (state == "SPEAKING")
+        self.hud.state = state
+        self.hud.speaking = state == "SPEAKING"
 
     def _check_config(self) -> bool:
-        if not API_FILE.exists(): return False
         try:
-            d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
+            # Check if secret exists in .env
+            settings.get_secret("GEMINI_API_KEY")
+            # Check if os_system is configured in settings.json
+            os_system = settings.get_settings().get("os_system")
+            return bool(os_system)
+        except RuntimeError:
+            return False
         except Exception:
             return False
 
@@ -872,20 +1018,20 @@ class MainWindow(QMainWindow):
         cw = self.centralWidget()
         ow, oh = 460, 390
         ov.setGeometry(
-            (cw.width()  - ow) // 2,
+            (cw.width() - ow) // 2,
             (cw.height() - oh) // 2,
-            ow, oh,
+            ow,
+            oh,
         )
         ov.done.connect(self._on_setup_done)
         ov.show()
         self._overlay = ov
 
     def _on_setup_done(self, key: str, os_name: str):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
-            encoding="utf-8",
-        )
+        # Save secret to .env
+        settings.save_secret("GEMINI_API_KEY", key)
+        # Save settings to settings.json
+        settings.save_settings({"os_system": os_name})
         self._ready = True
         if self._overlay:
             self._overlay.hide()
@@ -893,11 +1039,14 @@ class MainWindow(QMainWindow):
         self._apply_state("LISTENING")
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. JARVIS online.")
 
+
 class _RootShim:
     def __init__(self, app: QApplication):
         self._app = app
+
     def mainloop(self):
         self._app.exec()
+
     def protocol(self, *_):
         pass
 

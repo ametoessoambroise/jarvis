@@ -4,6 +4,8 @@ import re
 import sys
 from pathlib import Path
 
+from config.settings import get_secret
+
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -12,6 +14,7 @@ def get_base_dir():
 
 
 BASE_DIR = get_base_dir()
+# Deprecated: kept for compatibility with existing imports
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
 
@@ -26,33 +29,12 @@ CHUNK_SIZE = 1024
 def _get_api_key() -> str:
     """Return the Gemini API key.
 
-    Priority:
-    1. GEMINI_API_KEY environment variable (recommended for production).
-    2. config/api_keys.json fallback (local dev only — never commit this file).
+    Delegates to the unified configuration loader.
+    Priority: environment variable > .env > error.
 
     Raises RuntimeError with a clear message if no key can be found.
     """
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not key:
-        try:
-            with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-                key = json.load(f).get("gemini_api_key", "").strip()
-        except FileNotFoundError:
-            raise RuntimeError(
-                "Gemini API key not found. "
-                "Set the GEMINI_API_KEY environment variable or create config/api_keys.json."
-            ) from None
-        except (json.JSONDecodeError, OSError) as exc:
-            raise RuntimeError(
-                f"Could not read config/api_keys.json: {exc}. "
-                "Set the GEMINI_API_KEY environment variable instead."
-            ) from exc
-    if not key:
-        raise RuntimeError(
-            "Gemini API key is empty. "
-            "Set GEMINI_API_KEY or add 'gemini_api_key' to config/api_keys.json."
-        )
-    return key
+    return get_secret("GEMINI_API_KEY")
 
 
 def _load_system_prompt() -> str:
