@@ -88,6 +88,82 @@ class TestSecretPrecedence:
         with pytest.raises(RuntimeError, match="Secret 'TEST_SECRET' not found"):
             settings.get_secret("TEST_SECRET")
 
+    def test_cascade_env_over_profile_and_root(self, monkeypatch, tmp_path):
+        """Environment variable takes precedence over profile .env and root .env."""
+        monkeypatch.setenv("CASCADE_KEY", "val_env")
+        profile_env = tmp_path / ".jarvis" / ".env"
+        profile_env.parent.mkdir(parents=True, exist_ok=True)
+        profile_env.write_text("CASCADE_KEY=val_profile\n", encoding="utf-8")
+        root_env = tmp_path / "root" / ".env"
+        root_env.parent.mkdir(parents=True, exist_ok=True)
+        root_env.write_text("CASCADE_KEY=val_root\n", encoding="utf-8")
+
+        new_paths = settings.Paths(
+            root=tmp_path / "root",
+            config_dir=tmp_path / "config",
+            memory_dir=tmp_path / "memory",
+            logs_dir=tmp_path / "logs",
+            secrets_env=root_env,
+            projects_dir=tmp_path / "projects",
+        )
+        with patch.object(settings, "paths", new_paths), patch.object(
+            Path, "home", return_value=tmp_path
+        ):
+            assert settings.get_secret("CASCADE_KEY") == "val_env"
+
+    def test_cascade_profile_over_root(self, monkeypatch, tmp_path):
+        """Profile .env takes precedence over root .env when env var is absent."""
+        monkeypatch.delenv("CASCADE_KEY", raising=False)
+        profile_env = tmp_path / ".jarvis" / ".env"
+        profile_env.parent.mkdir(parents=True, exist_ok=True)
+        profile_env.write_text("CASCADE_KEY=val_profile\n", encoding="utf-8")
+        root_env = tmp_path / "root" / ".env"
+        root_env.parent.mkdir(parents=True, exist_ok=True)
+        root_env.write_text("CASCADE_KEY=val_root\n", encoding="utf-8")
+
+        new_paths = settings.Paths(
+            root=tmp_path / "root",
+            config_dir=tmp_path / "config",
+            memory_dir=tmp_path / "memory",
+            logs_dir=tmp_path / "logs",
+            secrets_env=root_env,
+            projects_dir=tmp_path / "projects",
+        )
+        with patch.object(settings, "paths", new_paths), patch.object(
+            Path, "home", return_value=tmp_path
+        ):
+            assert settings.get_secret("CASCADE_KEY") == "val_profile"
+
+    def test_cascade_root_fallback(self, monkeypatch, tmp_path):
+        """Root .env is used when neither env var nor profile .env has the key."""
+        monkeypatch.delenv("CASCADE_KEY", raising=False)
+        profile_dir = tmp_path / "profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        root_env = tmp_path / "root" / ".env"
+        root_env.parent.mkdir(parents=True, exist_ok=True)
+        root_env.write_text("CASCADE_KEY=val_root\n", encoding="utf-8")
+
+        new_paths = settings.Paths(
+            root=tmp_path / "root",
+            config_dir=tmp_path / "config",
+            memory_dir=tmp_path / "memory",
+            logs_dir=tmp_path / "logs",
+            secrets_env=root_env,
+            projects_dir=tmp_path / "projects",
+        )
+        with patch.object(settings, "paths", new_paths), patch.object(
+            Path, "home", return_value=profile_dir
+        ):
+            assert settings.get_secret("CASCADE_KEY") == "val_root"
+
+    def test_frozen_paths_target_user_profile(self, tmp_path):
+        """Frozen mode should target ~/.jarvis/.env for secrets."""
+        with patch.object(sys, "frozen", True, create=True), patch.object(
+            sys, "executable", str(tmp_path / "bin" / "jarvis.exe")
+        ):
+            frozen_paths = settings._get_paths()
+            assert frozen_paths.secrets_env == Path.home() / ".jarvis" / ".env"
+
 
 class TestSaveSecret:
     """Test secret saving behavior."""
@@ -402,3 +478,14 @@ class TestPublicCompatibility:
 
         with patch.object(settings, "paths", new_paths):
             assert is_linux() is True
+
+
+class TestNetworkGating:
+    """Verify that socket network access is blocked in offline unit tests."""
+
+    def test_network_connection_is_blocked(self):
+        import socket
+
+        s = socket.socket()
+        with pytest.raises(RuntimeError, match="Network access is blocked in tests"):
+            s.connect(("1.1.1.1", 80))
