@@ -10,20 +10,15 @@ import os
 from pathlib import Path
 from typing import Callable
 
+from config import settings
+
 from agent.planner import create_plan, replan
 from agent.error_handler import analyze_error, generate_fix, ErrorDecision
 
 # Centralised API key — never duplicate this logic
 from core.utils import _get_api_key  # noqa: E402
 
-
-def get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-BASE_DIR = get_base_dir()
+BASE_DIR = settings.paths.root
 
 
 # ---------------------------------------------------------------------------

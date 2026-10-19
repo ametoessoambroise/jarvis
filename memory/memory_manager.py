@@ -4,16 +4,10 @@ from threading import Lock
 from pathlib import Path
 import sys
 
+from config import settings
 
-def get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-BASE_DIR = get_base_dir()
-MEMORY_PATH = BASE_DIR / "memory" / "long_term.json"
-MEMORY_DIR = BASE_DIR / "memory"
+MEMORY_PATH = settings.paths.memory_dir / "long_term.json"
+MEMORY_DIR = settings.paths.memory_dir
 _lock = Lock()
 MAX_VALUE_LENGTH = 380
 MEMORY_MAX_CHARS = 8000
