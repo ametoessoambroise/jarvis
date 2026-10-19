@@ -335,7 +335,7 @@ def reminder(
 
     # Optional: allow scheduling to trigger internal Jarvis function calls.
     jarvis_call = parameters.get("jarvis_call")
-    repo_root = str(_base_dir())
+    repo_root = str(settings.paths.root)
     try:
         script_path = _write_notify_script(
             task_name, safe_msg, os_name, jarvis_call=jarvis_call, repo_root=repo_root

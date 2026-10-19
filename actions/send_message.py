@@ -278,7 +278,7 @@ def _send_with_attachments(
     if not _MEDIA_UTILS:
         return "Media utilities are not available; cannot prepare attachments."
 
-    temp_dir = Path(_base_dir()) / "temp" / "send_message"
+    temp_dir = settings.paths.root / "temp" / "send_message"
     temp_dir.mkdir(parents=True, exist_ok=True)
     attachment_paths = []
 
