@@ -8,6 +8,7 @@ ui/config/api_keys.json
 .env
 .env.*
 !.env.example
+config/settings.json
 *.pem
 *.key
 
