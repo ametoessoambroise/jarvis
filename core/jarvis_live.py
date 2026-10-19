@@ -167,11 +167,228 @@ class JarvisLive:
         )
 
     async def _execute_tool(self, fc) -> types.FunctionResponse:
+        """Exécute un outil Gemini via le dispatcher centralisé.
+
+        Drapeau de retour arrière : JARVIS_USE_LEGACY_EXECUTE=1 (P4 gate).
+        """
+        import os
+        if os.environ.get("JARVIS_USE_LEGACY_EXECUTE") == "1":
+            return await self._execute_tool_legacy(fc)
+
+        name = fc.name
+        args = dict(fc.args or {})
+
+        print(f"[JARVIS] 🔧 {name}  {args}")
+        self.ui.set_state("THINKING")
+
+        # ── Handlers internes (accèdent à self) ──────────────────────────────
+        internal_result: str | None = None
+        handled_internally = True
+
+        if name == "save_memory":
+            internal_result = await self._handle_save_memory(args)
+        elif name == "agent_task":
+            internal_result = await self._handle_agent_task(args)
+        elif name == "toggle_screen_share":
+            internal_result = await self._handle_toggle_screen_share(args)
+        elif name == "interact_ui":
+            internal_result = await self._handle_interact_ui(args)
+        elif name == "shutdown_jarvis":
+            internal_result = await self._handle_shutdown_jarvis(args)
+        elif name == "screen_process":
+            internal_result = await self._handle_screen_process(args)
+        elif name == "manage_autonomy":
+            internal_result = await self._handle_manage_autonomy(args)
+        elif name == "send_message":
+            # send_message nécessite un pré-appel get_context — géré ici
+            internal_result = await self._handle_send_message(args)
+        elif name == "file_processor":
+            # file_processor utilise self.ui.current_file
+            internal_result = await self._handle_file_processor(args)
+        else:
+            handled_internally = False
+
+        if handled_internally:
+            result_str = internal_result or "terminé, non vérifié"
+            print(f"[JARVIS] 📤 {name} → {str(result_str)[:80]}")
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+            return types.FunctionResponse(
+                id=fc.id, name=name, response={"result": result_str}
+            )
+
+        # ── Dispatcher pour les 17 outils restants ───────────────────────────
+        from core.tool_registry import _REGISTRY
+        from core.tool_dispatcher import dispatch
+
+        loop = asyncio.get_event_loop()
+        spec = _REGISTRY.get(name)
+
+        if spec is None:
+            result_str = f"Unknown tool: {name}"
+        else:
+            context = {"player": self.ui, "speak": self.speak}
+            tool_result = await loop.run_in_executor(
+                None, lambda: dispatch(spec, args, context)
+            )
+            result_str = tool_result.message
+
+        print(f"[JARVIS] 📤 {name} → {str(result_str)[:80]}")
+        if not self.ui.muted:
+            self.ui.set_state("LISTENING")
+        return types.FunctionResponse(
+            id=fc.id, name=name, response={"result": result_str}
+        )
+
+    # ── Handlers internes ─────────────────────────────────────────────────────
+
+    async def _handle_save_memory(self, args: dict) -> str:
+        category = args.get("category", "notes")
+        key = args.get("key", "")
+        value = args.get("value", "")
+        if key and value:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, lambda: update_memory({category: {key: {"value": value}}})
+            )
+            print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+        return "ok"
+
+    async def _handle_agent_task(self, args: dict) -> str:
+        from agent.task_queue import get_queue, TaskPriority
+        priority_map = {
+            "low": TaskPriority.LOW,
+            "normal": TaskPriority.NORMAL,
+            "high": TaskPriority.HIGH,
+        }
+        priority = priority_map.get(
+            args.get("priority", "normal").lower(), TaskPriority.NORMAL
+        )
+        task_id = get_queue().submit(
+            goal=args.get("goal", ""), priority=priority, speak=self.speak
+        )
+        return f"Task started (ID: {task_id})."
+
+    async def _handle_toggle_screen_share(self, args: dict) -> str:
+        state = args.get("state", "off").lower()
+        if state == "on":
+            self.screen_share_active = True
+            self.screen_share_worker.active = True
+            self.tray.show_active()
+            self.ui.write_log("SYS: Screen sharing started.")
+            return "Screen sharing is now active. I will receive your screen frames and UI elements."
+        else:
+            self._on_tray_stop_screen_share()
+            return "Screen sharing stopped."
+
+    async def _handle_interact_ui(self, args: dict) -> str:
+        import time as _time
+        import pyautogui
+        action = args.get("action", "")
+        x, y = args.get("x"), args.get("y")
+        elem_name = args.get("name", "")
+        val = args.get("value", "")
+
+        self.overlay.show_click_preview(x, y, label=elem_name or action)
+
+        def _do_action():
+            if action == "click":
+                pyautogui.click(x, y)
+            elif action == "type":
+                pyautogui.click(x, y)
+                _time.sleep(0.1)
+                pyautogui.write(val, interval=0.02)
+
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(
+            None, lambda: self.action_verifier.execute_with_verification(_do_action)
+        )
+        await loop.run_in_executor(
+            None,
+            lambda: self.logger.log(action, {"x": x, "y": y, "name": elem_name}, val, success),
+        )
+        return f"Action {action} at ({x},{y}) executed. Verified: {success}"
+
+    async def _handle_shutdown_jarvis(self, args: dict) -> str:
+        import os as _os
+        self.ui.write_log("SYS: Shutdown requested.")
+        self.speak("Goodbye, sir.")
+
+        def _shutdown():
+            import time as _time
+            _time.sleep(1)
+            _os._exit(0)
+
+        threading.Thread(target=_shutdown, daemon=True).start()
+        return "Shutting down."
+
+    async def _handle_screen_process(self, args: dict) -> str:
+        threading.Thread(
+            target=screen_process,
+            kwargs={"parameters": args, "response": None, "player": self.ui, "session_memory": None},
+            daemon=True,
+        ).start()
+        return "Vision module activated. Stay completely silent — vision module will speak directly."
+
+    async def _handle_manage_autonomy(self, args: dict) -> str:
+        loop = asyncio.get_event_loop()
+        r = await loop.run_in_executor(
+            None, lambda: manage_autonomy(parameters=args, player=self.ui, jarvis=self)
+        )
+        return r or "Autonomy settings updated."
+
+    async def _handle_send_message(self, args: dict) -> str:
+        """send_message avec pré-appel get_context."""
+        loop = asyncio.get_event_loop()
+        receiver = args.get("receiver") or args.get("contact") or args.get("to")
+        platform = args.get("platform", "whatsapp")
+        if receiver:
+            try:
+                ctx_args = {"contact": receiver, "app": platform}
+                ctx_r = await loop.run_in_executor(
+                    None,
+                    lambda: get_context(
+                        parameters=ctx_args, response=None, player=self.ui, session_memory=None
+                    ),
+                )
+                if ctx_r:
+                    try:
+                        self.ui.write_log(f"[GetContext] {str(ctx_r)[:200]}")
+                    except Exception:
+                        pass
+            except Exception as e:
+                try:
+                    self.ui.write_log(f"[GetContext] failed: {e}")
+                except Exception:
+                    pass
+
+        r = await loop.run_in_executor(
+            None,
+            lambda: send_message(parameters=args, response=None, player=self.ui, session_memory=None),
+        )
+        return r or f"Message sent to {args.get('receiver')}."
+
+    async def _handle_file_processor(self, args: dict) -> str:
+        """file_processor avec injection de self.ui.current_file si absent."""
+        loop = asyncio.get_event_loop()
+        if not args.get("file_path") and self.ui.current_file:
+            args["file_path"] = self.ui.current_file
+        r = await loop.run_in_executor(
+            None,
+            lambda: file_processor(parameters=args, player=self.ui, speak=self.speak),
+        )
+        return r or "Done."
+
+    async def _execute_tool_legacy(self, fc) -> types.FunctionResponse:
+        """Implémentation historique if/elif — drapeau JARVIS_USE_LEGACY_EXECUTE=1.
+
+        Conservée intacte jusqu'à la gate de P4 pour retour arrière rapide.
+        """
         name = fc.name
         args = dict(fc.args or {})
         loop = asyncio.get_event_loop()
 
-        print(f"[JARVIS] 🔧 {name}  {args}")
+        print(f"[JARVIS][legacy] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
 
         if name == "save_memory":
@@ -193,281 +410,74 @@ class JarvisLive:
 
         try:
             if name == "open_app":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: open_app(parameters=args, response=None, player=self.ui),
-                )
+                r = await loop.run_in_executor(None, lambda: open_app(parameters=args, response=None, player=self.ui))
                 result = r or f"Opened {args.get('app_name')}."
-
             elif name == "weather_report":
-                r = await loop.run_in_executor(
-                    None, lambda: weather_action(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: weather_action(parameters=args, player=self.ui))
                 result = r or "Weather delivered."
-
             elif name == "browser_control":
-                r = await loop.run_in_executor(
-                    None, lambda: browser_control(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: browser_control(parameters=args, player=self.ui))
                 result = r or "Done."
-
             elif name == "file_controller":
-                r = await loop.run_in_executor(
-                    None, lambda: file_controller(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: file_controller(parameters=args, player=self.ui))
                 result = r or "Done."
-
             elif name == "send_message":
-                # Ensure we read recent chat context before sending a message
-                receiver = args.get("receiver") or args.get("contact") or args.get("to")
-                platform = args.get("platform", "whatsapp")
-                if receiver:
-                    try:
-                        ctx_args = {"contact": receiver, "app": platform}
-                        ctx_r = await loop.run_in_executor(
-                            None,
-                            lambda: get_context(
-                                parameters=ctx_args,
-                                response=None,
-                                player=self.ui,
-                                session_memory=None,
-                            ),
-                        )
-                        if ctx_r:
-                            # Log context capture result to UI
-                            try:
-                                self.ui.write_log(f"[GetContext] {str(ctx_r)[:200]}")
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        try:
-                            self.ui.write_log(f"[GetContext] failed: {e}")
-                        except Exception:
-                            pass
-
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: send_message(
-                        parameters=args,
-                        response=None,
-                        player=self.ui,
-                        session_memory=None,
-                    ),
-                )
-                result = r or f"Message sent to {args.get('receiver')}."
-
+                result = await self._handle_send_message(args)
             elif name == "get_context":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: get_context(
-                        parameters=args,
-                        response=None,
-                        player=self.ui,
-                        session_memory=None,
-                    ),
-                )
+                r = await loop.run_in_executor(None, lambda: get_context(parameters=args, response=None, player=self.ui, session_memory=None))
                 result = r or "Context retrieved."
-
             elif name == "reminder":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: reminder(parameters=args, response=None, player=self.ui),
-                )
+                r = await loop.run_in_executor(None, lambda: reminder(parameters=args, response=None, player=self.ui))
                 result = r or "Reminder set."
-
             elif name == "youtube_video":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: youtube_video(
-                        parameters=args, response=None, player=self.ui
-                    ),
-                )
+                r = await loop.run_in_executor(None, lambda: youtube_video(parameters=args, response=None, player=self.ui))
                 result = r or "Done."
-
             elif name == "screen_process":
-                threading.Thread(
-                    target=screen_process,
-                    kwargs={
-                        "parameters": args,
-                        "response": None,
-                        "player": self.ui,
-                        "session_memory": None,
-                    },
-                    daemon=True,
-                ).start()
-                result = "Vision module activated. Stay completely silent — vision module will speak directly."
-
+                result = await self._handle_screen_process(args)
             elif name == "computer_settings":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: computer_settings(
-                        parameters=args, response=None, player=self.ui
-                    ),
-                )
+                r = await loop.run_in_executor(None, lambda: computer_settings(parameters=args, response=None, player=self.ui))
                 result = r or "Done."
-
             elif name == "manage_autonomy":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: manage_autonomy(
-                        parameters=args, player=self.ui, jarvis=self
-                    ),
-                )
-                result = r or "Autonomy settings updated."
-
+                result = await self._handle_manage_autonomy(args)
             elif name == "system_optimizer":
-                r = await loop.run_in_executor(
-                    None, lambda: system_optimizer(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: system_optimizer(parameters=args, player=self.ui))
                 result = r or "System optimization action executed."
-
             elif name == "iot_control":
-                r = await loop.run_in_executor(
-                    None, lambda: iot_control(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: iot_control(parameters=args, player=self.ui))
                 result = r or "IoT control action completed."
-
             elif name == "desktop_control":
-                r = await loop.run_in_executor(
-                    None, lambda: desktop_control(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: desktop_control(parameters=args, player=self.ui))
                 result = r or "Done."
-
             elif name == "code_helper":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: code_helper(
-                        parameters=args, player=self.ui, speak=self.speak
-                    ),
-                )
+                r = await loop.run_in_executor(None, lambda: code_helper(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
-
             elif name == "dev_agent":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: dev_agent(
-                        parameters=args, player=self.ui, speak=self.speak
-                    ),
-                )
+                r = await loop.run_in_executor(None, lambda: dev_agent(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
-
             elif name == "agent_task":
-                from agent.task_queue import get_queue, TaskPriority
-
-                priority_map = {
-                    "low": TaskPriority.LOW,
-                    "normal": TaskPriority.NORMAL,
-                    "high": TaskPriority.HIGH,
-                }
-                priority = priority_map.get(
-                    args.get("priority", "normal").lower(), TaskPriority.NORMAL
-                )
-                task_id = get_queue().submit(
-                    goal=args.get("goal", ""), priority=priority, speak=self.speak
-                )
-                result = f"Task started (ID: {task_id})."
-
+                result = await self._handle_agent_task(args)
             elif name == "web_search":
-                r = await loop.run_in_executor(
-                    None, lambda: web_search_action(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: web_search_action(parameters=args, player=self.ui))
                 result = r or "Done."
             elif name == "file_processor":
-                if not args.get("file_path") and self.ui.current_file:
-                    args["file_path"] = self.ui.current_file
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: file_processor(
-                        parameters=args, player=self.ui, speak=self.speak
-                    ),
-                )
-                result = r or "Done."
-
+                result = await self._handle_file_processor(args)
             elif name == "computer_control":
-                r = await loop.run_in_executor(
-                    None, lambda: computer_control(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: computer_control(parameters=args, player=self.ui))
                 result = r or "Done."
-
             elif name == "game_updater":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: game_updater(
-                        parameters=args, player=self.ui, speak=self.speak
-                    ),
-                )
+                r = await loop.run_in_executor(None, lambda: game_updater(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
-
             elif name == "flight_finder":
-                r = await loop.run_in_executor(
-                    None, lambda: flight_finder(parameters=args, player=self.ui)
-                )
+                r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
-
             elif name == "toggle_screen_share":
-                state = args.get("state", "off").lower()
-                if state == "on":
-                    self.screen_share_active = True
-                    self.screen_share_worker.active = True
-                    self.tray.show_active()
-                    self.ui.write_log("SYS: Screen sharing started.")
-                    result = "Screen sharing is now active. I will receive your screen frames and UI elements."
-                else:
-                    self._on_tray_stop_screen_share()
-                    result = "Screen sharing stopped."
-
+                result = await self._handle_toggle_screen_share(args)
             elif name == "interact_ui":
-                action = args.get("action", "")
-                x, y = args.get("x"), args.get("y")
-                elem_name = args.get("name", "")
-                val = args.get("value", "")
-
-                # Show overlay
-                self.overlay.show_click_preview(x, y, label=elem_name or action)
-
-                import pyautogui
-
-                def _do_action():
-                    if action == "click":
-                        pyautogui.click(x, y)
-                    elif action == "type":
-                        pyautogui.click(x, y)
-                        time.sleep(0.1)
-                        pyautogui.write(val, interval=0.02)
-
-                import time
-
-                # Execute with verification
-                success = await loop.run_in_executor(
-                    None,
-                    lambda: self.action_verifier.execute_with_verification(_do_action),
-                )
-
-                # Log action
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.logger.log(
-                        action, {"x": x, "y": y, "name": elem_name}, val, success
-                    ),
-                )
-
-                result = f"Action {action} at ({x},{y}) executed. Verified: {success}"
-
+                result = await self._handle_interact_ui(args)
             elif name == "shutdown_jarvis":
-                self.ui.write_log("SYS: Shutdown requested.")
-                self.speak("Goodbye, sir.")
-
-                def _shutdown():
-                    import time, os
-
-                    time.sleep(1)
-                    os._exit(0)
-
-                threading.Thread(target=_shutdown, daemon=True).start()
-
+                result = await self._handle_shutdown_jarvis(args)
             else:
                 result = f"Unknown tool: {name}"
-
         except Exception as e:
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
@@ -476,7 +486,7 @@ class JarvisLive:
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
 
-        print(f"[JARVIS] 📤 {name} → {str(result)[:80]}")
+        print(f"[JARVIS][legacy] 📤 {name} → {str(result)[:80]}")
         return types.FunctionResponse(id=fc.id, name=name, response={"result": result})
 
     async def _send_realtime(self):

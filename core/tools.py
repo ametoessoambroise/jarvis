@@ -582,3 +582,16 @@ TOOL_DECLARATIONS = [
         }
     }
 ]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P3 - TOOL_DECLARATIONS reconstruit depuis le registre central (source de verite)
+# La liste statique ci-dessus est conservee comme fallback.
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from core.tool_registry import _REGISTRY as _tool_registry
+    _registry_declarations = _tool_registry.declarations()
+    if len(_registry_declarations) == 26:
+        TOOL_DECLARATIONS = _registry_declarations
+except Exception:
+    pass  # fallback silencieux sur la liste statique
