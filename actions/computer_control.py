@@ -8,6 +8,10 @@ import time
 import random
 from pathlib import Path
 
+from config import settings
+
+_MEMORY_PATH = settings.paths.memory_dir / "long_term.json"
+
 # Centralised API key — never duplicate this logic
 from core.utils import _get_api_key  # noqa: E402
 
@@ -26,31 +30,6 @@ try:
     _PYPERCLIP = True
 except ImportError:
     _PYPERCLIP = False
-
-
-def _base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-_BASE = _base_dir()
-_MEMORY_PATH = _BASE / "memory" / "long_term.json"
-
-
-def _get_os() -> str:
-    """Read the OS type from api_keys.json config (os_system field)."""
-    try:
-        import json
-
-        cfg_path = _BASE / "config" / "api_keys.json"
-        return (
-            json.loads(cfg_path.read_text(encoding="utf-8"))
-            .get("os_system", "windows")
-            .lower()
-        )
-    except Exception:
-        return "windows"
 
 
 _SAFE_SCREENSHOT_ROOTS = (Path.home(),)
@@ -282,7 +261,7 @@ def _clear_field() -> str:
 
 
 def _focus_window(title: str) -> str:
-    os_name = _get_os()
+    os_name = settings.get_os()
 
     if os_name == "windows":
         try:
