@@ -1,3 +1,13 @@
+"""core/autonomy_manager.py — Experimental / Simulated autonomy layer.
+
+WARNING: This module is **experimental and not yet connected** to the main
+JARVIS execution pipeline.  No proactive tasks are currently dispatched by
+this manager; the AutonomyManager runs in an isolated asyncio loop and its
+agent/idea machinery is purely simulated.  It is kept for future V1.5 work.
+
+Do NOT rely on its output for production decisions.
+"""
+
 import asyncio
 import logging
 import uuid
@@ -7,9 +17,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Callable
 
-# Configure basic logging for visibility.
-# Set level to INFO to see agent and manager actions, DEBUG for more detailed internal workings.
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Do NOT call logging.basicConfig here — it would reconfigure the root logger
+# for the entire process and override any configuration set by the caller.
 logger = logging.getLogger('AutonomyManager')
 
 # --- Enums for Status and Priority ---

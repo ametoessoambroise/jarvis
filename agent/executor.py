@@ -1,180 +1,21 @@
-import ast
-import json
-import re
-import sys
-import shutil
+import time
 import threading
-import subprocess
-import tempfile
-import os
-from pathlib import Path
 from typing import Callable
 
 from config import settings
-
 from agent.planner import create_plan, replan
-from agent.error_handler import analyze_error, generate_fix, ErrorDecision
+from agent.error_handler import analyze_error, ErrorDecision
+from agent.execution_types import (
+    ExecutionResult,
+    ExecutionStatus,
+    StepResult,
+    StepStatus,
+)
 
 # Centralised API key — never duplicate this logic
 from core.utils import _get_api_key  # noqa: E402
 
 BASE_DIR = settings.paths.root
-
-
-# ---------------------------------------------------------------------------
-# Safety: static analysis before executing any LLM-generated code
-# ---------------------------------------------------------------------------
-
-_FORBIDDEN_CALLS = frozenset(
-    {
-        "os.system",
-        "os.remove",
-        "os.unlink",
-        "os.rmdir",
-        "os.removedirs",
-        "shutil.rmtree",
-        "shutil.move",
-        "shutil.copy",
-        "subprocess.run",
-        "subprocess.Popen",
-        "subprocess.call",
-        "subprocess.check_output",
-        "__import__",
-        "eval",
-        "exec",
-        "compile",
-    }
-)
-
-
-def _check_code_safety(code: str) -> list[str]:
-    """Return a list of forbidden call patterns found in the code.
-
-    Uses AST parsing so string-matching false positives are minimised.
-    A non-empty return value means the code should NOT be executed.
-    """
-    violations: list[str] = []
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return violations  # Will fail at runtime; let caller decide
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        # attribute call: os.system(...)
-        if isinstance(func, ast.Attribute):
-            owner = getattr(func.value, "id", "")
-            call_str = f"{owner}.{func.attr}" if owner else func.attr
-            if call_str in _FORBIDDEN_CALLS:
-                violations.append(call_str)
-        # plain call: eval(...), exec(...)
-        elif isinstance(func, ast.Name):
-            if func.id in _FORBIDDEN_CALLS:
-                violations.append(func.id)
-
-    return violations
-
-
-def _run_generated_code(description: str, speak: Callable | None = None) -> str:
-    import google.generativeai as genai
-
-    if speak:
-        speak("Writing custom code for this task, sir.")
-
-    home = Path.home()
-    desktop = home / "Desktop"
-    downloads = home / "Downloads"
-    documents = home / "Documents"
-
-    if not desktop.exists():
-        try:
-            import winreg
-
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
-            )
-            desktop = Path(winreg.QueryValueEx(key, "Desktop")[0])
-        except Exception:
-            pass
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=(
-            "You are an expert Python developer. "
-            "Write clean, complete, working Python code. "
-            "Use standard library + common packages. "
-            "Install missing packages with subprocess + pip if needed. "
-            "Return ONLY the Python code. No explanation, no markdown, no backticks.\n\n"
-            f"SYSTEM PATHS:\n"
-            f"  Desktop   = r'{desktop}'\n"
-            f"  Downloads = r'{downloads}'\n"
-            f"  Documents = r'{documents}'\n"
-            f"  Home      = r'{home}'\n"
-        ),
-    )
-
-    try:
-        response = model.generate_content(
-            f"Write Python code to accomplish this task:\n\n{description}"
-        )
-        code = response.text.strip()
-        code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
-
-        # --- Safety check before execution ---
-        violations = _check_code_safety(code)
-        if violations:
-            raise RuntimeError(
-                f"Generated code contains forbidden operations {violations}. "
-                "Execution blocked for safety."
-            )
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(code)
-            tmp_path = f.name
-
-        print(f"[Executor] 🐍 Running generated code: {tmp_path}")
-
-        # Run in an isolated temp directory, not Path.home()
-        sandbox_dir = Path(tempfile.mkdtemp(prefix="jarvis_sandbox_"))
-        try:
-            result = subprocess.run(
-                [sys.executable, tmp_path],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=str(sandbox_dir),
-            )
-        finally:
-            shutil.rmtree(sandbox_dir, ignore_errors=True)
-
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-
-        output = result.stdout.strip()
-        error = result.stderr.strip()
-
-        if result.returncode == 0 and output:
-            return output
-        elif result.returncode == 0:
-            return "Task completed successfully."
-        elif error:
-            raise RuntimeError(f"Code error: {error[:400]}")
-        return "Completed."
-
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("Generated code timed out after 30 seconds.")
-    except RuntimeError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"Generated code failed: {e}")
 
 
 def _inject_context(
@@ -191,13 +32,13 @@ def _inject_context(
             all_results = [
                 v
                 for v in step_results.values()
-                if v and len(v) > 100 and v not in ("Done.", "Completed.")
+                if v and len(str(v)) > 100 and v not in ("Done.", "Completed.")
             ]
             if all_results:
-                combined = "\n\n---\n\n".join(all_results)
+                combined = "\n\n---\n\n".join(str(r) for r in all_results)
                 translated = _translate_to_goal_language(combined, goal)
                 params["content"] = translated
-                print(f"[Executor] 💉 Injected + translated content")
+                print("[Executor] 💉 Injected + translated content")
 
     return params
 
@@ -251,12 +92,6 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
 
 def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
 
-    if tool == "generated_code":
-        description = parameters.get("description", "")
-        if not description:
-            raise ValueError("generated_code requires a 'description' parameter.")
-        return _run_generated_code(description, speak=speak)
-
     if tool == "screen_process":
         from actions.screen_processor import screen_process
 
@@ -269,7 +104,7 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
     if not spec:
         raise ValueError(
             f"Unknown tool '{tool}'. No automatic fallback is allowed — "
-            "add this tool to _call_tool() explicitly."
+            "add this tool to the registry explicitly."
         )
 
     res = _REGISTRY.call(tool, parameters, context={"player": None, "speak": speak})
@@ -277,6 +112,15 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
 
 
 class AgentExecutor:
+    """Executes a multi-step plan and returns a typed ExecutionResult.
+
+    Status rules (BACKEND_SCHEMA.md §3.3):
+      SUCCEEDED : every critical step is OK or UNVERIFIED; no FAILED step.
+      PARTIAL   : at least one non-critical step is SKIPPED or FAILED.
+      ABORTED   : execution stopped via an ABORT decision.
+      FAILED    : critical step failed after all replans exhausted.
+      CANCELLED : cancel_flag was set before completion.
+    """
 
     MAX_REPLAN_ATTEMPTS = 2
 
@@ -285,12 +129,12 @@ class AgentExecutor:
         goal: str,
         speak: Callable | None = None,
         cancel_flag: threading.Event | None = None,
-    ) -> str:
+    ) -> ExecutionResult:
         print(f"\n[Executor] 🎯 Goal: {goal}")
 
-        replan_attempts = 0
-        completed_steps = []
-        step_results = {}
+        replan_count = 0
+        step_results: dict[int, str] = {}    # step_num → raw tool output
+        all_step_results: list[StepResult] = []
         plan = create_plan(goal)
 
         while True:
@@ -300,41 +144,56 @@ class AgentExecutor:
                 msg = "I couldn't create a valid plan for this task, sir."
                 if speak:
                     speak(msg)
-                return msg
+                return ExecutionResult(
+                    status=ExecutionStatus.FAILED,
+                    steps=tuple(all_step_results),
+                    summary=msg,
+                    error="no_plan",
+                    replans=replan_count,
+                )
 
-            success = True
+            any_failed = False
             failed_step = None
             failed_error = ""
 
             for step in steps:
                 if cancel_flag and cancel_flag.is_set():
+                    msg = "Task cancelled, sir."
                     if speak:
-                        speak("Task cancelled, sir.")
-                    return "Task cancelled."
+                        speak(msg)
+                    return ExecutionResult(
+                        status=ExecutionStatus.CANCELLED,
+                        steps=tuple(all_step_results),
+                        summary=msg,
+                        replans=replan_count,
+                    )
 
-                step_num = step.get("step", "?")
-                tool = step.get("tool", "generated_code")
-                desc = step.get("description", "")
-                params = step.get("parameters", {})
+                step_num = step.get("step", len(all_step_results) + 1)
+                tool     = step.get("tool", "generated_code")
+                desc     = step.get("description", "")
+                params   = dict(step.get("parameters", {}))
+                critical = step.get("critical", False)
 
                 params = _inject_context(params, tool, step_results, goal=goal)
 
                 print(f"\n[Executor] ▶️ Step {step_num}: [{tool}] {desc}")
 
-                attempt = 1
-                step_ok = False
+                attempt   = 1
+                step_ok   = False
+                step_status  = StepStatus.FAILED
+                step_message = ""
+                step_error   = None
 
                 while attempt <= 3:
                     if cancel_flag and cancel_flag.is_set():
                         break
                     try:
-                        result = _call_tool(tool, params, speak)
-                        step_results[step_num] = result
-                        completed_steps.append(step)
-                        print(
-                            f"[Executor] ✅ Step {step_num} done: {str(result)[:100]}"
-                        )
-                        step_ok = True
+                        raw_result = _call_tool(tool, params, speak)
+                        step_results[step_num] = raw_result
+                        step_ok      = True
+                        step_status  = StepStatus.OK
+                        step_message = str(raw_result)[:200]
+                        print(f"[Executor] ✅ Step {step_num} done: {step_message[:100]}")
                         break
 
                     except Exception as e:
@@ -343,7 +202,9 @@ class AgentExecutor:
                             f"[Executor] ❌ Step {step_num} attempt {attempt} failed: {error_msg}"
                         )
 
-                        recovery = analyze_error(step, error_msg, attempt=attempt)
+                        recovery = analyze_error(
+                            step, error_msg, attempt=attempt, max_attempts=3
+                        )
                         decision = recovery["decision"]
                         user_msg = recovery.get("user_message", "")
 
@@ -352,101 +213,169 @@ class AgentExecutor:
 
                         if decision == ErrorDecision.RETRY:
                             attempt += 1
-                            import time
-
                             time.sleep(2)
                             continue
 
                         elif decision == ErrorDecision.SKIP:
+                            # SKIP is never treated as success — it's skipped.
                             print(f"[Executor] ⏭️ Skipping step {step_num}")
-                            completed_steps.append(step)
-                            step_ok = True
+                            step_status  = StepStatus.SKIPPED
+                            step_message = f"Skipped: {error_msg[:100]}"
+                            step_ok      = True   # don't break the loop, just move on
                             break
 
                         elif decision == ErrorDecision.ABORT:
-                            msg = f"Task aborted, sir. {recovery.get('reason', '')}"
+                            reason = recovery.get("reason", "")
+                            msg = f"Task aborted, sir. {reason}"
                             if speak:
                                 speak(msg)
-                            return msg
+                            all_step_results.append(StepResult(
+                                index=step_num, tool=tool,
+                                status=StepStatus.FAILED, attempts=attempt,
+                                message=step_message, error=error_msg,
+                            ))
+                            return ExecutionResult(
+                                status=ExecutionStatus.ABORTED,
+                                steps=tuple(all_step_results),
+                                summary=msg,
+                                error=error_msg,
+                                replans=replan_count,
+                            )
 
-                        else:
-                            fix_suggestion = recovery.get("fix_suggestion", "")
-                            if fix_suggestion and tool != "generated_code":
-                                try:
-                                    fixed_step = generate_fix(
-                                        step, error_msg, fix_suggestion
-                                    )
-                                    if speak:
-                                        speak("Trying an alternative approach, sir.")
-                                    res = _call_tool(
-                                        fixed_step["tool"],
-                                        fixed_step["parameters"],
-                                        speak,
-                                    )
-                                    step_results[step_num] = res
-                                    completed_steps.append(step)
-                                    step_ok = True
-                                    break
-                                except Exception as fix_err:
-                                    print(f"[Executor] ⚠️ Fix failed: {fix_err}")
-
-                            failed_step = step
+                        else:  # REPLAN
+                            failed_step  = step
                             failed_error = error_msg
-                            success = False
+                            any_failed   = True
+                            step_error   = error_msg
                             break
 
-                if not step_ok and not failed_step:
-                    failed_step = step
-                    failed_error = "Max retries exceeded"
-                    success = False
+                # Record the step result
+                all_step_results.append(StepResult(
+                    index=step_num, tool=tool,
+                    status=step_status, attempts=attempt,
+                    message=step_message, error=step_error,
+                ))
 
-                if not success:
+                if not step_ok:
+                    any_failed   = True
+                    failed_step  = failed_step or step
+                    failed_error = failed_error or "Step failed"
+
+                if any_failed and critical:
+                    # Critical failure — break inner step loop to try replan
                     break
 
-            if success:
-                return self._summarize(goal, completed_steps, speak)
+            # ── Inner step loop finished ──────────────────────────────────────
 
-            if replan_attempts >= self.MAX_REPLAN_ATTEMPTS:
-                msg = f"Task failed after {replan_attempts} replan attempts, sir."
+            if cancel_flag and cancel_flag.is_set():
+                msg = "Task cancelled, sir."
                 if speak:
                     speak(msg)
-                return msg
+                return ExecutionResult(
+                    status=ExecutionStatus.CANCELLED,
+                    steps=tuple(all_step_results),
+                    summary=msg,
+                    replans=replan_count,
+                )
+
+            if not any_failed:
+                # Check if any step was skipped → PARTIAL, else SUCCEEDED
+                has_skipped = any(
+                    s.status == StepStatus.SKIPPED for s in all_step_results
+                )
+                exec_status = ExecutionStatus.PARTIAL if has_skipped else ExecutionStatus.SUCCEEDED
+                return self._build_result(
+                    exec_status, goal, all_step_results, replan_count, speak
+                )
+
+            # ── Failure: decide to replan or give up ─────────────────────────
+            if replan_count >= self.MAX_REPLAN_ATTEMPTS:
+                msg = (
+                    f"Task failed after {replan_count} replan attempt(s), sir. "
+                    f"Last error: {failed_error[:100]}"
+                )
+                if speak:
+                    speak(msg)
+                return ExecutionResult(
+                    status=ExecutionStatus.FAILED,
+                    steps=tuple(all_step_results),
+                    summary=msg,
+                    error=failed_error[:200],
+                    replans=replan_count,
+                )
 
             if speak:
                 speak("Adjusting my approach, sir.")
 
-            replan_attempts += 1
+            replan_count += 1
+            completed_steps = [
+                s._asdict() if hasattr(s, "_asdict") else step
+                for s, step in zip(all_step_results, plan.get("steps", []))
+                if s.status in (StepStatus.OK, StepStatus.UNVERIFIED)
+            ]
             plan = replan(goal, completed_steps, failed_step, failed_error)
+            # Reset per-replan tracking (keep accumulated results)
+            all_step_results = []
+            step_results = {}
+            any_failed = False
 
-    def _summarize(
-        self, goal: str, completed_steps: list, speak: Callable | None
-    ) -> str:
-        fallback = (
-            f"All done, sir. Completed {len(completed_steps)} steps for: {goal[:60]}."
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _build_result(
+        self,
+        status: ExecutionStatus,
+        goal: str,
+        step_results: list[StepResult],
+        replan_count: int,
+        speak: Callable | None,
+    ) -> ExecutionResult:
+        """Build an ExecutionResult with an honest summary."""
+        summary = _build_summary(goal, step_results)
+        if speak:
+            speak(summary)
+
+        return ExecutionResult(
+            status=status,
+            steps=tuple(step_results),
+            summary=summary,
+            replans=replan_count,
         )
-        try:
-            import google.generativeai as genai
 
-            # _get_api_key() is already imported from core.utils at module level
-            model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash-lite",
-                client_options={"api_key": _get_api_key()},
-            )
-            steps_str = "\n".join(
-                f"- {s.get('description', '')}" for s in completed_steps
-            )
-            prompt = (
-                f'User goal: "{goal}"\n'
-                f"Completed steps:\n{steps_str}\n\n"
-                "Write a single natural sentence summarizing what was accomplished. "
-                "Address the user as 'sir'. Be direct and positive."
-            )
-            response = model.generate_content(prompt)
-            summary = response.text.strip()
-            if speak:
-                speak(summary)
-            return summary
-        except Exception:
-            if speak:
-                speak(fallback)
-            return fallback
+
+def _build_summary(goal: str, step_results: list[StepResult]) -> str:
+    """Build an honest natural summary of what was accomplished."""
+    ok_count      = sum(1 for s in step_results if s.status == StepStatus.OK)
+    skipped_count = sum(1 for s in step_results if s.status == StepStatus.SKIPPED)
+    failed_count  = sum(1 for s in step_results if s.status == StepStatus.FAILED)
+    total         = len(step_results)
+
+    # Construct a factual fallback summary first
+    parts = [f"Completed {ok_count}/{total} steps for: {goal[:60]}."]
+    if skipped_count:
+        parts.append(f"{skipped_count} step(s) skipped.")
+    if failed_count:
+        parts.append(f"{failed_count} step(s) failed.")
+    fallback = " ".join(parts)
+
+    try:
+        import google.generativeai as genai
+
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash-lite",
+            client_options={"api_key": _get_api_key()},
+        )
+        steps_str = "\n".join(
+            f"- [{s.status}] {s.tool}: {s.message[:80]}"
+            for s in step_results
+        )
+        prompt = (
+            f'User goal: "{goal}"\n'
+            f"Step outcomes:\n{steps_str}\n\n"
+            "Write a single natural sentence summarising what was accomplished. "
+            "Mention any steps that were skipped or failed honestly. "
+            "Address the user as 'sir'. Be direct."
+        )
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception:
+        return fallback

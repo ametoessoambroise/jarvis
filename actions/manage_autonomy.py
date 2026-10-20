@@ -40,5 +40,6 @@ def manage_autonomy(parameters: dict[str, Any], response=None, player=None, jarv
         return manager.set_sensitivity(level)
 
     return (
-        "Unknown manage_autonomy action. Use enable, disable, status, or set_sensitivity."
+        "Unknown manage_autonomy action. Use enable, disable, status, or set_sensitivity. "
+        "Note: autonomy is experimental — no proactive tasks are currently executed."
     )
