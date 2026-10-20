@@ -185,6 +185,19 @@ def dispatch(
             error=ErrorCode.VALIDATION_FAILED,
         )
 
+    # ── 1b. Gating de confirmation stopgap (P7 / R-O04..R-O08, R-O25..R-O26) ────
+    from core.confirmation import is_sensitive_action, request_confirmation
+
+    sensitive, desc = is_sensitive_action(spec.name, params)
+    if sensitive:
+        confirmed = request_confirmation(desc)
+        if not confirmed:
+            return ToolResult(
+                status=ResultStatus.DECLINED,
+                message=f"Action '{spec.name}' annulée : confirmation refusée ou expirée.",
+                error=ErrorCode.CONFIRMATION_DECLINED,
+            )
+
     # ── 2. Import tardif du handler ──────────────────────────────────────────
     try:
         fn = _resolve_handler(spec.handler)

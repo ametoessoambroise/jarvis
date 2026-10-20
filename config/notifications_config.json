@@ -7,7 +7,7 @@
     "Discord",
     "Messenger"
   ],
-  "auto_reply_enabled": true,
+  "auto_reply_enabled": false,
   "rules": [
     {
       "app": "WhatsApp",

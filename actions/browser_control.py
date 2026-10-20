@@ -57,8 +57,25 @@ def _user_agent() -> str:
     )
 
 
+def _should_use_real_browser_profile() -> bool:
+    try:
+        from config import settings
+        cfg = settings.get_settings()
+        return bool(cfg.get("browser_use_real_profile", False))
+    except Exception:
+        return False
+
+
 def _real_profile_dir(browser: str) -> str:
     home  = Path.home()
+    dedicated = home / ".jarvis_profiles" / browser
+    dedicated.mkdir(parents=True, exist_ok=True)
+
+    # R-O18 / P7: Dedicated profile is the DEFAULT unless explicitly requested in settings
+    if not _should_use_real_browser_profile():
+        print(f"[Browser] 🛡️ Using dedicated Jarvis profile for {browser}: {dedicated}")
+        return str(dedicated)
+
     local = os.environ.get("LOCALAPPDATA", "")
     roam  = os.environ.get("APPDATA", "")
 
@@ -611,7 +628,9 @@ class _BrowserSession:
         page = await self._get_page()
         try:
             text = await page.inner_text("body")
-            return text[:4_000]
+            trimmed = text[:4_000]
+            url = page.url
+            return f'<untrusted source="web" url="{url}">\n{trimmed}\n</untrusted>'
         except Exception as e:
             return f"Could not get page text: {e}"
 
