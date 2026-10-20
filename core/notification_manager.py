@@ -14,16 +14,29 @@ if sys.platform == "win32":
     except ImportError:
         pass
 
+MAX_SEEN_IDS = 1000
+
 class NotificationManager:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
         self.config_path = base_dir / "config" / "notifications_config.json"
         self.seen_ids = set()
+        self._seen_order = []
         self.initialized = False
         self.listener = None
         self.allowed_apps = []
         self.rules = []
         self.auto_reply_enabled = True
+
+    def _add_seen_id(self, notif_id: int) -> None:
+        """Ajoute un id vu et borne la taille maximale de l'historique."""
+        if notif_id not in self.seen_ids:
+            self.seen_ids.add(notif_id)
+            self._seen_order.append(notif_id)
+            if len(self._seen_order) > MAX_SEEN_IDS:
+                oldest = self._seen_order.pop(0)
+                self.seen_ids.discard(oldest)
+
 
     def load_config(self):
         try:
@@ -60,7 +73,7 @@ class NotificationManager:
             # Pre-populate seen notification IDs so we don't process old notifications
             initial_notifs = await self.listener.get_notifications_async(notifications.NotificationKinds.TOAST)
             for notif in initial_notifs:
-                self.seen_ids.add(notif.id)
+                self._add_seen_id(notif.id)
             print(f"[NotificationManager] Initialized. Ignored {len(self.seen_ids)} existing notifications.")
             self.initialized = True
             return True
@@ -108,7 +121,7 @@ class NotificationManager:
             
             for notif in notifs:
                 if notif.id not in self.seen_ids:
-                    self.seen_ids.add(notif.id)
+                    self._add_seen_id(notif.id)
                     
                     app_name = notif.app_info.display_info.display_name
                     

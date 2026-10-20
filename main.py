@@ -4,7 +4,7 @@ import sys
 import threading
 
 from ui import JarvisUI
-from core.jarvis_live import JarvisLive
+from core.application import JarvisApplication
 from core.file_watcher import watch_and_restart
 
 
@@ -13,11 +13,12 @@ def run_jarvis(ui: JarvisUI):
 
     def runner():
         ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
+        app = JarvisApplication(ui)
         try:
-            asyncio.run(jarvis.run())
+            asyncio.run(app.run())
         except KeyboardInterrupt:
             print("\n🔴 Shutting down...")
+            asyncio.run(app.shutdown())
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
