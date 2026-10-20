@@ -198,18 +198,8 @@ class TestTrimToLimit:
 # Known defect — R-O13 (no reentrant lock, no corrupt-JSON recovery path)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "R-O13: memory_manager uses a plain Lock (not RLock). "
-        "Reentrant calls from the same thread (e.g. save_memory → save_memory_docs "
-        "calling load_memory) would deadlock. "
-        "Additionally, corrupt JSON does not trigger .bak restoration. "
-        "Fix scheduled for P6."
-    ),
-)
 def test_lock_is_reentrant(mem_dir):
-    """The lock should be an RLock so the same thread can acquire it twice."""
+    """The lock should be an RLock so the same thread can acquire it twice (P6 fix for R-O13)."""
     _dir, mm = mem_dir
     import threading
     # RLock can be acquired twice from the same thread; plain Lock deadlocks
@@ -218,16 +208,8 @@ def test_lock_is_reentrant(mem_dir):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "R-O13: corrupt JSON does not fall back to .bak file. "
-        "load_memory() currently returns empty memory instead of restoring backup. "
-        "Fix scheduled for P6."
-    ),
-)
 def test_corrupt_json_restored_from_backup(mem_dir):
-    """When long_term.json is corrupt, a valid .bak should be restored."""
+    """When long_term.json is corrupt, a valid .bak should be restored (P6 fix for R-O13)."""
     _dir, mm = mem_dir
 
     # Create a valid save first (produces .bak on second save)
