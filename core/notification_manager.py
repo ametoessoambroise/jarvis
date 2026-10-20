@@ -26,7 +26,7 @@ class NotificationManager:
         self.listener = None
         self.allowed_apps = []
         self.rules = []
-        self.auto_reply_enabled = True
+        self.auto_reply_enabled = False
 
     def _add_seen_id(self, notif_id: int) -> None:
         """Ajoute un id vu et borne la taille maximale de l'historique."""
@@ -45,7 +45,7 @@ class NotificationManager:
                     cfg = json.load(f)
                     self.enabled = cfg.get("enabled", True)
                     self.allowed_apps = cfg.get("allowed_apps", ["WhatsApp", "WhatsApp Web", "Telegram", "Discord", "Messenger"])
-                    self.auto_reply_enabled = cfg.get("auto_reply_enabled", True)
+                    self.auto_reply_enabled = cfg.get("auto_reply_enabled", False)
                     self.rules = cfg.get("rules", [])
             else:
                 self.enabled = False

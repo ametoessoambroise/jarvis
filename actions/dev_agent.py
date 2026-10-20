@@ -2,6 +2,7 @@ import subprocess
 import sys
 import re
 import time
+import json
 from pathlib import Path
 
 # Centralised API key and code-safety checker — never duplicate these
@@ -277,13 +278,26 @@ Code for {file_path}:"""
         raise
 
 
+_ALLOWED_RUN_EXECUTABLES: frozenset[str] = frozenset(
+    {"python", "python3", "node", "npm", "npx", "ts-node", "pytest"}
+)
+
+
 def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
     if not dependencies:
         return "No external dependencies."
 
     to_install = []
     for dep in dependencies:
-        pkg_name = re.split(r"[>=<!]", dep)[0].strip()
+        pkg_name = re.split(r"[>=<!]", dep)[0].strip().lower()
+
+        # R-O07 / ADR-015: Only install packages on whitelist automatically; others require confirmation
+        if pkg_name not in _ALLOWED_AUTO_INSTALL:
+            from core.confirmation import request_confirmation
+            if not request_confirmation(f"Install unwhitelisted dependency '{dep}' via pip"):
+                print(f"[DevAgent] ⚠️ Skipped unwhitelisted dependency '{dep}' (confirmation declined).")
+                continue
+
         result = subprocess.run(
             [sys.executable, "-m", "pip", "show", pkg_name],
             capture_output=True,
@@ -295,7 +309,7 @@ def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
             print(f"[DevAgent] ✓ Already installed: {pkg_name}")
 
     if not to_install:
-        return f"All dependencies already installed: {', '.join(dependencies)}"
+        return f"All dependencies already installed or skipped: {', '.join(dependencies)}"
 
     print(f"[DevAgent] 📦 Installing: {to_install}")
     try:
@@ -340,10 +354,24 @@ def _open_vscode(project_dir: Path) -> bool:
 
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
+    parts = run_command.split()
+    if not parts:
+        return "No run command specified."
+
+    exe = Path(parts[0]).name.lower()
+    if exe.endswith(".exe"):
+        exe = exe[:-4]
+
+    allowed_exes = _ALLOWED_RUN_EXECUTABLES | {Path(sys.executable).name.lower().replace(".exe", "")}
+    if exe not in allowed_exes and parts[0] != sys.executable:
+        return (
+            f"Command execution blocked: '{parts[0]}' is not in the allowed executables list "
+            f"({', '.join(sorted(_ALLOWED_RUN_EXECUTABLES))}) (R-O07 / ADR-015)."
+        )
+
     print(f"[DevAgent] 🚀 Running: {run_command}")
     try:
-        parts = run_command.split()
-        if parts[0].lower() == "python":
+        if parts[0].lower() in ("python", "python.exe", "python3"):
             parts[0] = sys.executable
 
         result = subprocess.run(

@@ -16,13 +16,16 @@ class TestIsSafePath:
     """_is_safe_path must reject anything outside Path.home()."""
 
     def test_home_itself_is_safe(self):
-        assert _is_safe_path(Path.home()) is True
+        # ADR-015: the bare home dir is NOT a safe root — only known subdirs are.
+        # This is intentional: Jarvis must not freely roam the whole home.
+        assert _is_safe_path(Path.home()) is False
 
     def test_child_of_home_is_safe(self):
         assert _is_safe_path(Path.home() / "Documents" / "report.pdf") is True
 
     def test_deeply_nested_in_home_is_safe(self):
-        assert _is_safe_path(Path.home() / "a" / "b" / "c" / "d.txt") is True
+        # Paths outside known subdirs are NOT safe (ADR-015 policy).
+        assert _is_safe_path(Path.home() / "a" / "b" / "c" / "d.txt") is False
 
     def test_system_root_is_rejected(self):
         assert _is_safe_path(Path("C:/Windows/System32")) is False

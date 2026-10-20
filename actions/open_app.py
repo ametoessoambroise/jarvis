@@ -78,12 +78,24 @@ def _normalize(raw: str) -> str:
     return raw  
 
 def _launch_windows(app_name: str) -> bool:
+    import os
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
+    # 1. Protocols / URIs (e.g. ms-settings:) via os.startfile (safe, no shell=True)
+    if ":" in app_name:
+        try:
+            os.startfile(app_name)
+            time.sleep(1.0)
+            return True
+        except Exception as exc:
+            print(f"[open_app] os.startfile({app_name}) failed: {exc}")
+
+    # 2. Executables found in PATH without shell=True
+    binary = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if binary:
         try:
             subprocess.Popen(
-                app_name,
-                shell=True,
+                [binary],
+                shell=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -92,14 +104,15 @@ def _launch_windows(app_name: str) -> bool:
         except Exception as e:
             print(f"[open_app] subprocess failed: {e}")
 
-    if ":" in app_name:
-        try:
-            subprocess.Popen(f"start {app_name}", shell=True)
-            time.sleep(1.0)
-            return True
-        except Exception:
-            pass
+    # 3. Direct startfile attempt (e.g. registered App Path)
+    try:
+        os.startfile(app_name)
+        time.sleep(1.5)
+        return True
+    except Exception:
+        pass
 
+    # 4. Fallback: Start Menu search via pyautogui
     try:
         import pyautogui
         pyautogui.PAUSE = 0.1
@@ -231,6 +244,11 @@ def open_app(
 
     if not app_name:
         return "No application name provided."
+
+    # R-O04: Reject shell metacharacters to prevent command injection
+    forbidden_metas = set("&|;><`$\n\r")
+    if any(ch in app_name for ch in forbidden_metas):
+        return f"Refused to launch application '{app_name}': contains forbidden characters."
 
     launcher = _OS_LAUNCHERS.get(_SYSTEM)
     if launcher is None:

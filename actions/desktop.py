@@ -105,7 +105,24 @@ def _build_sandbox() -> dict:
     return sandbox
 
 
+def _is_desktop_code_exec_allowed() -> bool:
+    """Check if in-process generated desktop code execution is permitted."""
+    try:
+        from config import settings
+        cfg = settings.get_settings()
+        return bool(cfg.get("allow_generated_desktop_code", False))
+    except Exception:
+        return False
+
+
 def _execute_generated_code(code: str, player=None) -> str:
+    # R-O05 / ADR-015: In-process exec of LLM-generated code disabled by default
+    if not _is_desktop_code_exec_allowed():
+        return (
+            "Arbitrary generated desktop code execution is disabled by default for security (R-O05 / ADR-015). "
+            "To enable, set 'allow_generated_desktop_code': true in settings.json."
+        )
+
     if not code or code.strip() == "UNSAFE":
         return "This action cannot be performed safely."
 
@@ -559,6 +576,12 @@ def desktop_control(
             if not actual_task:
                 return "Please describe what you want to do on the desktop."
 
+            if not _is_desktop_code_exec_allowed():
+                return (
+                    "Arbitrary generated desktop code execution is disabled by default for security (R-O05 / ADR-015). "
+                    "To enable, set 'allow_generated_desktop_code': true in settings.json."
+                )
+
             print(f"[Desktop] Asking Gemini: {actual_task}")
             if player:
                 player.write_log("[Desktop] Generating action...")
@@ -568,6 +591,11 @@ def desktop_control(
 
         else:
             if action:
+                if not _is_desktop_code_exec_allowed():
+                    return (
+                        f"Unknown desktop action '{action}'. "
+                        "Note: dynamic desktop task execution is disabled by default (R-O05 / ADR-015)."
+                    )
                 code = _ask_gemini_for_desktop_action(action)
                 return _execute_generated_code(code, player=player)
             return "No action or task specified."

@@ -12,21 +12,6 @@ except ImportError:
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
-_SAFE_ROOTS: list[Path] = [
-    Path.home(),
-]
-
-def _is_safe_path(target: Path) -> bool:
-    """Verilen path _SAFE_ROOTS içinde mi? Değilse işlemi reddet."""
-    try:
-        resolved = target.resolve()
-        return any(
-            resolved == root.resolve() or resolved.is_relative_to(root.resolve())
-            for root in _SAFE_ROOTS
-        )
-    except Exception:
-        return False
-
 def _get_desktop() -> Path:
     if _OS == "Linux":
         xdg = os.environ.get("XDG_DESKTOP_DIR", "")
@@ -70,15 +55,44 @@ def _get_videos() -> Path:
     return Path.home() / "Videos"
 
 
+# R-O26 / ADR-015: Restrict safe roots to standard user folders + ~/JarvisProjects (instead of all ~)
+_SAFE_ROOTS: list[Path] = [
+    _get_desktop(),
+    _get_downloads(),
+    _get_documents(),
+    _get_pictures(),
+    _get_music(),
+    _get_videos(),
+    Path.home() / "JarvisProjects",
+    Path.home() / "Desktop" / "JarvisProjects",
+]
+
+def _is_safe_path(target: Path) -> bool:
+    """Verifies that target is inside _SAFE_ROOTS (ADR-015)."""
+    try:
+        resolved = target.resolve()
+        for root in _SAFE_ROOTS:
+            try:
+                root_res = root.resolve()
+                if resolved == root_res or resolved.is_relative_to(root_res):
+                    return True
+            except Exception:
+                continue
+        return False
+    except Exception:
+        return False
+
+
 def _resolve_path(raw: str) -> Path:
     shortcuts: dict[str, Path] = {
+        "home":      Path.home(),
         "desktop":   _get_desktop(),
         "downloads": _get_downloads(),
         "documents": _get_documents(),
         "pictures":  _get_pictures(),
         "music":     _get_music(),
         "videos":    _get_videos(),
-        "home":      Path.home(),
+        "projects":  Path.home() / "Desktop" / "JarvisProjects",
     }
     lower = raw.strip().lower()
     if lower in shortcuts:
@@ -176,6 +190,11 @@ def delete_file(path: str, name: str = "") -> str:
         }
         if target.resolve() in {p.resolve() for p in protected}:
             return f"Protected directory, cannot delete: {target.name}"
+
+        # R-O26 / ADR-015: Stopgap confirmation for deletion
+        from core.confirmation import request_confirmation
+        if not request_confirmation(f"Permanently delete '{target.name}'"):
+            return f"Deletion of '{target.name}' declined or timed out by user."
 
         return _safe_trash(target)
 
