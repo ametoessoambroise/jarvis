@@ -1,16 +1,53 @@
 import json
-from datetime import datetime
-from threading import Lock
-from pathlib import Path
+import os
+import shutil
 import sys
+from datetime import datetime
+from pathlib import Path
+from threading import RLock
 
 from config import settings
 
-MEMORY_PATH = settings.paths.memory_dir / "long_term.json"
-MEMORY_DIR = settings.paths.memory_dir
-_lock = Lock()
+
+def _get_memory_dir() -> Path:
+    override = os.environ.get("JARVIS_MEMORY_DIR")
+    if override:
+        return Path(override).resolve()
+    # Support monkeypatched MEMORY_DIR if explicitly modified
+    if "MEMORY_DIR" in globals() and globals()["MEMORY_DIR"] is not None:
+        return globals()["MEMORY_DIR"]
+    return settings.paths.memory_dir
+
+
+def _get_memory_path() -> Path:
+    override = os.environ.get("JARVIS_MEMORY_DIR")
+    if override:
+        return Path(override).resolve() / "long_term.json"
+    if "MEMORY_PATH" in globals() and globals()["MEMORY_PATH"] is not None:
+        return globals()["MEMORY_PATH"]
+    return _get_memory_dir() / "long_term.json"
+
+
+MEMORY_DIR: Path = settings.paths.memory_dir
+MEMORY_PATH: Path = MEMORY_DIR / "long_term.json"
+
+# R-O13: RLock covers entire read-modify-write cycle and prevents reentrant deadlocks
+_lock = RLock()
+
 MAX_VALUE_LENGTH = 380
 MEMORY_MAX_CHARS = 8000
+
+VALID_CATEGORIES: frozenset[str] = frozenset({
+    "identity",
+    "preferences",
+    "projects",
+    "routines",
+    "context",
+    "skills",
+    "relationships",
+    "wishes",
+    "notes",
+})
 
 MEMORY_DOC_FILES = {
     "identity": "USER_IDENTITY.md",
@@ -38,20 +75,54 @@ def _empty_memory() -> dict:
 
 
 def load_memory() -> dict:
-    if not MEMORY_PATH.exists():
+    """Loads memory from long_term.json.
+
+    R-O13: If long_term.json is corrupt, it is quarantined to
+    long_term.json.corrupt-<timestamp> and auto-restored from long_term.json.bak
+    if the backup is valid JSON.
+    """
+    mem_path = _get_memory_path()
+    if not mem_path.exists():
         return _empty_memory()
+
     with _lock:
         try:
-            data = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                base = _empty_memory()
-                for key in base:
-                    if key not in data:
-                        data[key] = {}
-                return data
-            return _empty_memory()
-        except Exception as e:
-            print(f"[Memory] ⚠️ Load error: {e}")
+            raw_text = mem_path.read_text(encoding="utf-8")
+            data = json.loads(raw_text)
+            if not isinstance(data, dict):
+                raise ValueError("Memory JSON root is not an object/dict")
+            base = _empty_memory()
+            for key in base:
+                if key not in data or not isinstance(data[key], dict):
+                    data[key] = {}
+            return data
+        except Exception as exc:
+            # Corrupt file recovery
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            corrupt_path = mem_path.with_name(f"long_term.json.corrupt-{ts}")
+            print(f"[Memory] ⚠️ Corrupt memory file detected: {exc}. Quarantining to {corrupt_path.name}")
+            try:
+                shutil.copy2(mem_path, corrupt_path)
+            except Exception as copy_err:
+                print(f"[Memory] ⚠️ Failed to copy corrupt file to quarantine: {copy_err}")
+
+            bak_path = mem_path.with_suffix(".json.bak")
+            if bak_path.exists():
+                try:
+                    bak_text = bak_path.read_text(encoding="utf-8")
+                    bak_data = json.loads(bak_text)
+                    if isinstance(bak_data, dict):
+                        print(f"[Memory] 🔄 Restoring memory from backup {bak_path.name}")
+                        shutil.copy2(bak_path, mem_path)
+                        base = _empty_memory()
+                        for key in base:
+                            if key not in bak_data or not isinstance(bak_data[key], dict):
+                                bak_data[key] = {}
+                        return bak_data
+                except Exception as bak_err:
+                    print(f"[Memory] ⚠️ Backup file is also invalid: {bak_err}")
+
+            print("[Memory] ⚠️ No valid backup available. Initializing empty memory structure.")
             return _empty_memory()
 
 
@@ -75,35 +146,50 @@ def _trim_to_limit(memory: dict) -> dict:
     for cat, key, _ in entries:
         if len(json.dumps(memory, ensure_ascii=False)) <= MEMORY_MAX_CHARS:
             break
-        del memory[cat][key]
-        trimmed.append(f"{cat}/{key}")
+        if cat in memory and key in memory[cat]:
+            del memory[cat][key]
+            trimmed.append(f"{cat}/{key}")
     if trimmed:
         print(
-            f"[Memory] ⚠️ Trimmed {len(trimmed)} old entries to stay under limit: {trimmed}"
+            f"[Memory] ⚠️ Trimmed {len(trimmed)} old entries to stay under limit ({MEMORY_MAX_CHARS} chars): {trimmed}"
         )
     return memory
 
 
 def save_memory(memory: dict) -> None:
+    """Saves memory atomically.
+
+    R-O13: Only backs up the existing memory file to .bak if it is valid JSON.
+    Corrupted files are never copied to .bak.
+    """
     if not isinstance(memory, dict):
         return
-    memory = _trim_to_limit(memory)
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
     with _lock:
-        # Write to a temp file first, then atomically rename to avoid corruption
-        tmp_path = MEMORY_PATH.with_suffix(".json.tmp")
-        bak_path = MEMORY_PATH.with_suffix(".json.bak")
+        memory = _trim_to_limit(memory)
+        mem_dir = _get_memory_dir()
+        mem_path = _get_memory_path()
+        mem_dir.mkdir(parents=True, exist_ok=True)
+
+        tmp_path = mem_path.with_suffix(".json.tmp")
+        bak_path = mem_path.with_suffix(".json.bak")
+
+        # Keep one backup of the previous GOOD save only
+        if mem_path.exists():
+            try:
+                current_text = mem_path.read_text(encoding="utf-8")
+                parsed = json.loads(current_text)
+                if isinstance(parsed, dict):
+                    shutil.copy2(mem_path, bak_path)
+            except Exception as e:
+                print(f"[Memory] ⚠️ Skipping .bak copy: existing memory is not valid JSON ({e})")
+
         try:
             tmp_path.write_text(
                 json.dumps(memory, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            # Keep one backup of the previous good save
-            if MEMORY_PATH.exists():
-                import shutil as _shutil
-
-                _shutil.copy2(MEMORY_PATH, bak_path)
-            tmp_path.replace(MEMORY_PATH)
+            tmp_path.replace(mem_path)
         except Exception as exc:
             print(f"[Memory] ❌ Save failed: {exc}")
             try:
@@ -111,6 +197,7 @@ def save_memory(memory: dict) -> None:
             except Exception:
                 pass
             return
+
         save_memory_docs(memory)
 
 
@@ -121,7 +208,7 @@ def _entry_text(entry: dict) -> str:
 
 
 def _write_markdown_file(file_name: str, content: str) -> None:
-    target_path = MEMORY_DIR / file_name
+    target_path = _get_memory_dir() / file_name
     target_path.write_text(content, encoding="utf-8")
 
 
@@ -267,13 +354,35 @@ def _recursive_update(target: dict, updates: dict) -> bool:
 
 
 def update_memory(memory_update: dict) -> dict:
+    """Updates memory atomically covering the full read-modify-write cycle.
+
+    R-O13: Uses RLock across the entire cycle and routes unknown categories
+    to 'notes' with an explicit warning.
+    """
     if not isinstance(memory_update, dict) or not memory_update:
         return load_memory()
-    memory = load_memory()
-    if _recursive_update(memory, memory_update):
-        save_memory(memory)
-        print(f"[Memory] 💾 Saved: {list(memory_update.keys())}")
-    return memory
+
+    with _lock:
+        # Validate categories: unknown categories are migrated to "notes" with a warning
+        sanitized_update: dict = {}
+        for cat, items in memory_update.items():
+            if cat not in VALID_CATEGORIES:
+                print(f"[Memory] ⚠️ Unknown memory category '{cat}' — routing to 'notes'")
+                if "notes" not in sanitized_update:
+                    sanitized_update["notes"] = {}
+                if isinstance(items, dict):
+                    for subk, subv in items.items():
+                        sanitized_update["notes"][f"{cat}_{subk}"] = subv
+                else:
+                    sanitized_update["notes"][str(cat)] = items
+            else:
+                sanitized_update[cat] = items
+
+        memory = load_memory()
+        if _recursive_update(memory, sanitized_update):
+            save_memory(memory)
+            print(f"[Memory] 💾 Saved: {list(sanitized_update.keys())}")
+        return memory
 
 
 def format_memory_for_prompt(memory: dict | None) -> str:
@@ -392,32 +501,24 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
 
 def remember(key: str, value: str, category: str = "notes") -> str:
-    valid = {
-        "identity",
-        "preferences",
-        "projects",
-        "relationships",
-        "wishes",
-        "notes",
-        "routines",
-        "context",
-        "skills",
-    }
-    if category not in valid:
-        category = "notes"
-    update_memory({category: {key: {"value": value}}})
-    return f"Remembered: {category}/{key} = {value}"
+    with _lock:
+        if category not in VALID_CATEGORIES:
+            print(f"[Memory] ⚠️ Unknown category '{category}' in remember() — fallback to 'notes'")
+            category = "notes"
+        update_memory({category: {key: {"value": value}}})
+        return f"Remembered: {category}/{key} = {value}"
 
 
 def forget(key: str, category: str = "notes") -> str:
-    memory = load_memory()
-    cat = memory.get(category, {})
-    if key in cat:
-        del cat[key]
-        memory[category] = cat
-        save_memory(memory)
-        return f"Forgotten: {category}/{key}"
-    return f"Not found: {category}/{key}"
+    with _lock:
+        memory = load_memory()
+        cat = memory.get(category, {})
+        if key in cat:
+            del cat[key]
+            memory[category] = cat
+            save_memory(memory)
+            return f"Forgotten: {category}/{key}"
+        return f"Not found: {category}/{key}"
 
 
 forget_memory = forget
