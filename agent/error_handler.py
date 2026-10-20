@@ -1,8 +1,11 @@
 import json
 import re
-import sys
-from pathlib import Path
 from enum import Enum
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None  # type: ignore[assignment]
 
 from config import settings
 
@@ -13,10 +16,10 @@ BASE_DIR = settings.paths.root
 
 
 class ErrorDecision(Enum):
-    RETRY = "retry"
-    SKIP = "skip"
+    RETRY  = "retry"
+    SKIP   = "skip"
     REPLAN = "replan"
-    ABORT = "abort"
+    ABORT  = "abort"
 
 
 ERROR_ANALYST_PROMPT = """You are the error recovery module of MARK XXXIX AI assistant.
@@ -47,16 +50,16 @@ Return ONLY valid JSON:
 
 
 def analyze_error(
-    step: dict, error: str, attempt: int = 1, max_attempts: int = 2
+    step: dict, error: str, attempt: int = 1, max_attempts: int = 3
 ) -> dict:
-    """
-    Analyzes a failed step and returns a recovery decision.
+    """Analyses a failed step and returns a recovery decision.
 
     Args:
-        step         : The step dict that failed
-        error        : Error message/traceback
-        attempt      : Current attempt number
-        max_attempts : How many times we've already tried
+        step         : The step dict that failed.
+        error        : Error message/traceback.
+        attempt      : Current attempt number (1-based).
+        max_attempts : Maximum allowed attempts before forcing a replan
+                       (default: 3 — R-O12 fix, three real attempts).
 
     Returns:
         {
@@ -67,18 +70,27 @@ def analyze_error(
             "user_message": str
         }
     """
-    import google.generativeai as genai
-
+    # Force replan once we have exhausted all attempts.
     if attempt >= max_attempts:
         print(
-            f"[ErrorHandler] ⚠️ Max attempts reached for step {step.get('step')} — forcing replan"
+            f"[ErrorHandler] ⚠️ Max attempts ({max_attempts}) reached for step "
+            f"{step.get('step')} — forcing replan"
         )
         return {
-            "decision": ErrorDecision.REPLAN,
-            "reason": f"Failed {attempt} times: {error[:100]}",
+            "decision":       ErrorDecision.REPLAN,
+            "reason":         f"Failed {attempt} times: {error[:100]}",
             "fix_suggestion": "Try a completely different approach or tool",
-            "max_retries": 0,
-            "user_message": "Trying a different approach, sir.",
+            "max_retries":    0,
+            "user_message":   "Trying a different approach, sir.",
+        }
+
+    if genai is None:
+        return {
+            "decision":       ErrorDecision.REPLAN,
+            "reason":         "google-generativeai not installed",
+            "fix_suggestion": "Try alternative approach",
+            "max_retries":    0,
+            "user_message":   "Adjusting approach, sir.",
         }
 
     genai.configure(api_key=_get_api_key())
@@ -105,15 +117,16 @@ Attempt number: {attempt}"""
         result = json.loads(text)
         decision_str = result.get("decision", "replan").lower()
         decision_map = {
-            "retry": ErrorDecision.RETRY,
-            "skip": ErrorDecision.SKIP,
+            "retry":  ErrorDecision.RETRY,
+            "skip":   ErrorDecision.SKIP,
             "replan": ErrorDecision.REPLAN,
-            "abort": ErrorDecision.ABORT,
+            "abort":  ErrorDecision.ABORT,
         }
         result["decision"] = decision_map.get(decision_str, ErrorDecision.REPLAN)
 
+        # Critical steps must never be skipped — escalate to replan.
         if step.get("critical") and result["decision"] == ErrorDecision.SKIP:
-            result["decision"] = ErrorDecision.REPLAN
+            result["decision"]     = ErrorDecision.REPLAN
             result["user_message"] = (
                 "This step is critical — finding alternative approach, sir."
             )
@@ -126,68 +139,9 @@ Attempt number: {attempt}"""
     except Exception as e:
         print(f"[ErrorHandler] ⚠️ Analysis failed: {e} — defaulting to replan")
         return {
-            "decision": ErrorDecision.REPLAN,
-            "reason": str(e),
+            "decision":       ErrorDecision.REPLAN,
+            "reason":         str(e),
             "fix_suggestion": "Try alternative approach",
-            "max_retries": 1,
-            "user_message": "Encountered an issue, adjusting approach, sir.",
-        }
-
-
-def generate_fix(step: dict, error: str, fix_suggestion: str) -> dict:
-    """
-    When decision is REPLAN and a fix suggestion exists,
-    generates a replacement step using code_helper as fallback.
-
-    Returns a modified step dict.
-    """
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(model_name="gemini-2.0-flash")
-
-    prompt = f"""A task step failed. Generate a replacement step.
-
-Original step:
-Tool: {step.get('tool')}
-Description: {step.get('description')}
-Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
-
-Error: {error[:300]}
-Fix suggestion: {fix_suggestion}
-
-Write a Python script that accomplishes the same goal differently.
-Return ONLY the Python code, no explanation."""
-
-    try:
-        response = model.generate_content(prompt)
-        code = response.text.strip()
-        code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
-
-        return {
-            "step": step.get("step"),
-            "tool": "code_helper",
-            "description": f"Auto-fix for: {step.get('description')}",
-            "parameters": {
-                "action": "run",
-                "description": fix_suggestion,
-                "code": code,
-                "language": "python",
-            },
-            "depends_on": step.get("depends_on", []),
-            "critical": step.get("critical", False),
-        }
-
-    except Exception as e:
-        print(f"[ErrorHandler] ⚠️ Fix generation failed: {e}")
-        return {
-            "step": step.get("step"),
-            "tool": "code_helper",
-            "description": f"Fallback for: {step.get('description')}",
-            "parameters": {
-                "action": "write",
-                "description": step.get("description", ""),
-            },
-            "depends_on": step.get("depends_on", []),
-            "critical": step.get("critical", False),
+            "max_retries":    1,
+            "user_message":   "Encountered an issue, adjusting approach, sir.",
         }

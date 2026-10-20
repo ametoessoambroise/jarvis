@@ -146,15 +146,10 @@ class TestLifecycle:
 # Known defects (xfail strict=True) — R-O11
 # ─────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="R-O11: _tasks dict is unbounded — grows forever during long sessions.",
-)
 def test_tasks_dict_is_bounded():
-    """The _tasks registry should cap at some maximum (e.g. 100).
+    """The _tasks registry is capped at 100 (P5 fix for R-O11).
 
-    Currently the dict is never pruned, so this assertion fails.
-    When P5 fixes this, remove the xfail marker.
+    Submit 200 tasks and verify that _tasks never exceeds 100 entries.
     """
     q = TaskQueue()
     for i in range(200):

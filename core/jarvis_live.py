@@ -200,18 +200,54 @@ class JarvisLive:
     async def _handle_agent_task(self, args: dict) -> str:
         from agent.task_queue import TaskPriority, get_queue
 
+        action  = (args.get("action") or "submit").strip().lower()
+        task_id = (args.get("task_id") or "").strip()
+        queue   = get_queue()
+
+        if action == "status":
+            if not task_id:
+                return "Please provide a task_id to check status."
+            status = queue.get_status(task_id)
+            if status is None:
+                return f"No task found with ID '{task_id}'."
+            return (
+                f"Task [{task_id}] — status: {status['status']}. "
+                f"Goal: {status['goal'][:80]}. "
+                + (f"Result: {str(status['result'])[:120]}." if status['result'] else "")
+                + (f" Error: {status['error'][:80]}." if status['error'] else "")
+            )
+
+        if action == "cancel":
+            if not task_id:
+                return "Please provide a task_id to cancel."
+            success = queue.cancel(task_id)
+            return (
+                f"Task [{task_id}] cancelled." if success
+                else f"Could not cancel task [{task_id}] — not found or already terminal."
+            )
+
+        if action == "list":
+            statuses = queue.get_all_statuses()
+            if not statuses:
+                return "No tasks in the queue."
+            lines = [f"• [{s['task_id']}] {s['status']:10s} — {s['goal']}" for s in statuses]
+            return "Tasks:\n" + "\n".join(lines)
+
+        # Default: submit
         priority_map = {
-            "low": TaskPriority.LOW,
+            "low":    TaskPriority.LOW,
             "normal": TaskPriority.NORMAL,
-            "high": TaskPriority.HIGH,
+            "high":   TaskPriority.HIGH,
         }
         priority = priority_map.get(
-            args.get("priority", "normal").lower(), TaskPriority.NORMAL
+            (args.get("priority") or "normal").lower(), TaskPriority.NORMAL
         )
-        task_id = get_queue().submit(
-            goal=args.get("goal", ""), priority=priority, speak=self.speak
-        )
-        return f"Task started (ID: {task_id})."
+        goal = args.get("goal", "").strip()
+        if not goal:
+            return "Please provide a goal for the task."
+        new_id = queue.submit(goal=goal, priority=priority, speak=self.speak)
+        return f"Task started (ID: {new_id})."
+
 
     async def _handle_toggle_screen_share(self, args: dict) -> str:
         state = args.get("state", "off").lower()

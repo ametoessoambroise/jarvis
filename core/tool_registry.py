@@ -266,8 +266,23 @@ def _register_all() -> None:
 
     _REGISTRY.register(ToolSpec(
         name='agent_task',
-        description="Executes complex multi-step tasks requiring multiple different tools. Examples: 'research X and save to file', 'find and organize files'. DO NOT use for single commands. NEVER use for Steam/Epic — use game_updater.",
-        parameters={'type': 'OBJECT', 'properties': {'goal': {'type': 'STRING', 'description': 'Complete description of what to accomplish'}, 'priority': {'type': 'STRING', 'description': 'low | normal | high (default: normal)'}}, 'required': ['goal']},
+        description=(
+            "Executes complex multi-step tasks requiring multiple different tools. "
+            "Use action='submit' (default) to start a task, 'status' to check it, "
+            "'cancel' to stop it, 'list' to see all tasks. "
+            "Examples: 'research X and save to file', 'find and organize files'. "
+            "DO NOT use for single commands. NEVER use for Steam/Epic — use game_updater."
+        ),
+        parameters={
+            'type': 'OBJECT',
+            'properties': {
+                'goal':     {'type': 'STRING', 'description': 'Complete description of what to accomplish (required for action=submit)'},
+                'priority': {'type': 'STRING', 'description': 'low | normal | high (default: normal)'},
+                'action':   {'type': 'STRING', 'description': 'submit (default) | status | cancel | list'},
+                'task_id':  {'type': 'STRING', 'description': 'Task ID returned by a previous submit (required for status/cancel)'},
+            },
+            'required': [],
+        },
         handler='__internal__',
         planner=False,
         timeout_s=5.0,
