@@ -95,20 +95,10 @@ def test_network_is_blocked_in_tests():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Rule 1: core/ must not import from actions/
-# (xfail: violation exists in core/jarvis_live.py — planned fix in P4)
+# Rule 1: core/ must not import from actions/ (satisfied in P4)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.architecture
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "P4 target: core/jarvis_live.py currently imports directly from actions/ "
-        "(open_app, weather_report, reminder, etc.). "
-        "These will be replaced by dispatcher calls in P3/P4. "
-        "Remove xfail once core/ has zero direct action imports."
-    ),
-)
 def test_core_does_not_import_actions():
     """core/ modules must not import from actions/ (layering rule)."""
     violations = _any_file_imports_prefix("core", "actions")
@@ -119,19 +109,10 @@ def test_core_does_not_import_actions():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Rule 2: core/ must not import from ui/ (except via ui_port)
-# (xfail: core/jarvis_live.py imports ui.screen_overlay, ui.tray_indicator)
+# Rule 2: core/ must not import from ui/ (except via ui_port, satisfied in P4)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.architecture
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "P4 target: core/jarvis_live.py imports from ui/ directly. "
-        "UiPort protocol will replace these in P4. "
-        "Remove xfail once all ui imports in core/ go through ui_port."
-    ),
-)
 def test_core_does_not_import_ui():
     """core/ modules must not import from ui/ directly (use UiPort instead)."""
     violations = []
@@ -148,6 +129,7 @@ def test_core_does_not_import_ui():
         "core/ imports ui/ directly — violates layering:\n"
         + "\n".join(f"  {v}" for v in violations)
     )
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

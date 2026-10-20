@@ -1098,3 +1098,7 @@ class JarvisUI:
     def stop_speaking(self):
         if not self.muted:
             self.set_state("LISTENING")
+
+    def show_error(self, message: str):
+        self.write_log(f"ERR: {message}")
+

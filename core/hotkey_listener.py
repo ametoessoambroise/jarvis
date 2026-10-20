@@ -27,18 +27,38 @@ class HotkeyListener:
     def __init__(self, jarvis_live):
         self.jarvis_live = jarvis_live
         self._thread = None
+        self._started = False
+        self._hotkey_ref = None
 
     def start(self):
+        """Démarre l'écouteur de raccourci de manière idempotente."""
+        if self._started:
+            return
+
         if not _HOTKEY_ENABLED:
             print("[Hotkey] ⚠️ Missing dependencies (keyboard, pyautogui, mss, PIL). Hotkey disabled.")
             return
 
-        def _run():
-            keyboard.add_hotkey(HOTKEY, self._on_look_here)
-            keyboard.wait()
-            
-        self._thread = threading.Thread(target=_run, daemon=True)
-        self._thread.start()
+        try:
+            self._hotkey_ref = keyboard.add_hotkey(HOTKEY, self._on_look_here)
+            self._started = True
+            print(f"[Hotkey] ✅ Registered {HOTKEY}")
+        except Exception as e:
+            print(f"[Hotkey] ⚠️ Failed to register hotkey {HOTKEY}: {e}")
+
+    def stop(self):
+        """Désenregistre le raccourci clavier proprement."""
+        if not self._started:
+            return
+        if _HOTKEY_ENABLED and self._hotkey_ref is not None:
+            try:
+                keyboard.remove_hotkey(self._hotkey_ref)
+            except Exception as e:
+                print(f"[Hotkey] ⚠️ Error removing hotkey: {e}")
+            self._hotkey_ref = None
+        self._started = False
+        print(f"[Hotkey] 🛑 Unregistered {HOTKEY}")
+
 
     def _on_look_here(self):
         """Capture high-resolution area around the cursor and send to Gemini."""
